@@ -73,7 +73,7 @@ impl Song {
   }
 
   pub fn deezer_id(&self) -> Option<&str> {
-    self.path.as_ref().and_then(|path| happer::deezer::parse_filename(&path))
+    self.path.as_ref().and_then(|path| happer::deezer::parse_filename(path))
       .and_then(|caps| caps.get(4).map(|id| id.as_str()))
   }
 }
@@ -98,7 +98,15 @@ mod tests {
   }
 
   #[test]
-  fn test_items_exist() {
+  fn test_master_db() {
+    let rb = happer::rekordbox::Rekordbox::new("test_master.db").unwrap();
+    let content = rb.with_deezer("918205852").unwrap();
+    assert_eq!(3, content.Rating);
+    assert_eq!("29. 2020 Souls -- Aaaron [918205852].mp3", content.FileNameL);
+  }
+
+  #[test]
+  fn test_process_all() {
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
@@ -109,13 +117,13 @@ mod tests {
 
   #[test]
   fn test_deezer_id() {
-    let song = Song { path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(), rating: 3};
+    let song = Song { path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(), rating: 3 };
     let id = song.deezer_id().unwrap();
     assert_eq!("918205852", id);
   }
 
   #[test]
-  fn test_par_items_exist() {
+  fn test_par_process_all() {
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
@@ -139,14 +147,14 @@ mod tests {
   }
 
   #[test]
-  fn test_all_items() {
+  fn test_all_items_len() {
     let music = Music::default();
     let items = music.all_items();
     assert_eq!(6985, items.len());
   }
 
   #[test]
-  fn test_all_songs() {
+  fn test_all_songs_len() {
     let music = Music::default();
     let items = music.all_songs();
     assert_eq!(6985, items.len());
