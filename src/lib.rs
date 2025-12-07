@@ -76,6 +76,9 @@ impl Song {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use id3rs::ID3rs;
+  use rayon::iter::{IntoParallelIterator, ParallelIterator};
+  use std::fs;
 
   #[test]
   fn test_playlist_items() {
@@ -87,6 +90,44 @@ mod tests {
     assert_eq!("/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.path.as_ref().unwrap());
     assert_eq!("/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path().unwrap());
     assert_eq!(3, song.rating);
+  }
+
+  #[test]
+  fn test_items_exist() {
+    let music = Music::default();
+    let items = music.all_items();
+    let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
+    songs.into_iter().for_each(|song| {
+      process(song);
+    });
+  }
+
+  #[test]
+  fn test_par_items_exist() {
+    // ThreadPoolBuilder::new()
+    //   .num_threads(1)   // <-- set your number here
+    //   .build_global()
+    //   .unwrap();
+    let music = Music::default();
+    let items = music.all_items();
+    let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
+    songs.into_par_iter().for_each(|song| {
+      process(song);
+    });
+  }
+
+  fn process(song: Song) {
+    if let Some(path) = song.path {
+      match fs::exists(&path) {
+        Ok(_) => {
+          match ID3rs::read(&path) {
+            Ok(_) => {}
+            Err(_) => eprintln!("Cannot read {}", path),
+          }
+        }
+        Err(_) => eprintln!("{} does not exist", path),
+      };
+    }
   }
 
   #[test]

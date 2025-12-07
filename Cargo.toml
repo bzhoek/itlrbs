@@ -7,3 +7,5 @@ edition = "2024"
 objc2 = "0.6.3"
 objc2-foundation = "0.3.2"
 objc2-itunes-library = "0.3.2"
+id3rs = { git = "https://github.com/bzhoek/id3rs" }
+rayon = "1.11.0"
