@@ -103,11 +103,15 @@ mod tests {
   }
 
   #[test]
+  fn test_track_id() {
+    let filename = "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3";
+    let caps = happer::deezer::parse_filename(filename);
+    let id = caps.and_then(|caps| caps.get(4).map(|id| id.as_str())).unwrap_or("0");
+    assert_eq!("918205852", id);
+  }
+
+  #[test]
   fn test_par_items_exist() {
-    // ThreadPoolBuilder::new()
-    //   .num_threads(1)   // <-- set your number here
-    //   .build_global()
-    //   .unwrap();
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
