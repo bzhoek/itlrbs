@@ -71,6 +71,11 @@ impl Song {
       .and_then(|path| path.split_once(icloud))
       .map(|x| x.1)
   }
+
+  pub fn deezer_id(&self) -> Option<&str> {
+    self.path.as_ref().and_then(|path| happer::deezer::parse_filename(&path))
+      .and_then(|caps| caps.get(4).map(|id| id.as_str()))
+  }
 }
 
 #[cfg(test)]
@@ -103,11 +108,14 @@ mod tests {
   }
 
   #[test]
+  fn test_deezer_id() {
+    let song = Song { path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(), rating: 3};
+    let id = song.deezer_id().unwrap();
+    assert_eq!("918205852", id);
+  }
+
+  #[test]
   fn test_par_items_exist() {
-    // ThreadPoolBuilder::new()
-    //   .num_threads(1)   // <-- set your number here
-    //   .build_global()
-    //   .unwrap();
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
