@@ -161,14 +161,16 @@ mod tests {
       })
     }
   }
-
-  pub fn query_one<T, P>(conn: &PooledConnection<SqliteConnectionManager>, sql: &str, params: P) -> rusqlite::Result<T>
+  pub fn query_one<T, P>(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    sql: &str,
+    params: P,
+  ) -> rusqlite::Result<T>
   where
     P: Params,
-    for<'a> T: TryFrom<&'a Row<'a>>,
-    for<'a> <T as TryFrom<&'a Row<'a>>>::Error: Into<rusqlite::Error>,
+    for<'r> T: TryFrom<&'r Row<'r>, Error = rusqlite::Error>,
   {
-    conn.query_row(sql, params, |row| T::try_from(row).map_err(|e| e.into()))
+    conn.query_row(sql, params, |row| T::try_from(row))
   }
 
   fn process_db(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
