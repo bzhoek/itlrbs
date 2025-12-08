@@ -168,7 +168,7 @@ mod tests {
   ) -> rusqlite::Result<T>
   where
     P: Params,
-    for<'r> T: TryFrom<&'r Row<'r>, Error = rusqlite::Error>,
+    for<'r> T: TryFrom<&'r Row<'r>, Error=rusqlite::Error>,
   {
     conn.query_row(sql, params, |row| T::try_from(row))
   }
@@ -177,14 +177,13 @@ mod tests {
     if let Some(path) = song.path.as_ref() {
       if let Some(dzid) = song.deezer_id() {
         let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
-        let rbid: Result<Content, rusqlite::Error> = conn.query_row(
-          "SELECT * FROM djmdContent WHERE FileNameL like ?",
-          [format!("%[{}]%", dzid)],
-          |row| Content::try_from(row),
-        );
-        match rbid {
-          Ok(content) => {}
-          Err(_) => eprintln!("{:?} with {:?} not found", song.relative_path(), dzid)
+        match content {
+          Ok(content) => {
+            if song.rating > 0 && song.rating != content.rating {
+              eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path().unwrap(), song.rating, content.rating);
+            }
+          }
+          Err(_) => eprintln!("{} with {:?} not found in rekordbox", song.relative_path().unwrap(), dzid)
         }
       }
       match fs::exists(&path) {
