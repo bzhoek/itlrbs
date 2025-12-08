@@ -13,6 +13,7 @@ id3rs = { git = "https://github.com/bzhoek/id3rs" }
 #happer = { path = "../happer" }
 anyhow = "1.0.100"
 regex = "1.12.2"
+rusqlite = { version = "0.37.0", features = ["bundled-sqlcipher"] }
 r2d2 = "0.8.10"
 r2d2_sqlite = { version = "0.31.0", features = ["bundled-sqlcipher"] }
 dotenvy = "0.15.7"

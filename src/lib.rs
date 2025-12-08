@@ -87,12 +87,13 @@ pub fn parse_filename(filename: &str) -> Option<Captures<'_>> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use id3rs::ID3rs;
-  use rayon::iter::{IntoParallelIterator, ParallelIterator};
-  use std::{env, fs};
   use dotenvy::dotenv;
-  use r2d2::{Pool, PooledConnection};
+  use id3rs::ID3rs;
+  use r2d2::{Error, Pool, PooledConnection};
   use r2d2_sqlite::SqliteConnectionManager;
+  use rayon::iter::{IntoParallelIterator, ParallelIterator};
+  use rusqlite::{Params, Row};
+  use std::{env, fs};
 
   #[test]
   fn test_playlist_items() {
@@ -108,14 +109,7 @@ mod tests {
 
   #[test]
   fn test_sqlcipher() {
-    dotenv().ok();
-    let manager = SqliteConnectionManager::file("test_master.db")
-      .with_init(|conn| {
-        let pragma = format!("PRAGMA key = '{}';", env::var("SQLCIPHER_KEY").unwrap());
-        conn.execute_batch(pragma.as_str())
-      });
-
-    let pool = Pool::new(manager).unwrap();
+    let pool = pool_for("test_master.db").unwrap();
     let conn = pool.get().unwrap();
 
     let count: i64 = conn.query_row(
@@ -142,16 +136,53 @@ mod tests {
     });
   }
 
+  fn pool_for(path: &str) -> Result<Pool<SqliteConnectionManager>, Error> {
+    dotenv().ok();
+    let manager = SqliteConnectionManager::file(path)
+      .with_init(|conn| {
+        let pragma = format!("PRAGMA key = '{}';", env::var("SQLCIPHER_KEY").unwrap());
+        conn.execute_batch(pragma.as_str())
+      });
+
+    Pool::new(manager)
+  }
+  struct Content {
+    id: String,
+    rating: usize,
+  }
+
+  impl TryFrom<&Row<'_>> for Content {
+    type Error = rusqlite::Error;
+
+    fn try_from(value: &Row<'_>) -> Result<Self, Self::Error> {
+      Ok(Content {
+        id: value.get(0)?,
+        rating: value.get(15)?,
+      })
+    }
+  }
+
+  pub fn query_one<T, P>(conn: &PooledConnection<SqliteConnectionManager>, sql: &str, params: P) -> rusqlite::Result<T>
+  where
+    P: Params,
+    for<'a> T: TryFrom<&'a Row<'a>>,
+    for<'a> <T as TryFrom<&'a Row<'a>>>::Error: Into<rusqlite::Error>,
+  {
+    conn.query_row(sql, params, |row| T::try_from(row).map_err(|e| e.into()))
+  }
+
   fn process_db(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
     if let Some(path) = song.path.as_ref() {
       if let Some(dzid) = song.deezer_id() {
-        let rbid: Result<String, _> = conn.query_row(
+        let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
+        let rbid: Result<Content, rusqlite::Error> = conn.query_row(
           "SELECT * FROM djmdContent WHERE FileNameL like ?",
           [format!("%[{}]%", dzid)],
-          |row| row.get(0),
+          |row| Content::try_from(row),
         );
-        if rbid.is_err() {
-          eprintln!("{:?} with {:?} not found", song.relative_path(), rbid)
+        match rbid {
+          Ok(content) => {}
+          Err(_) => eprintln!("{:?} with {:?} not found", song.relative_path(), dzid)
         }
       }
       match fs::exists(&path) {
