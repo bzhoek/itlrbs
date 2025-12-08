@@ -185,8 +185,10 @@ mod tests {
         let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
         match content {
           Ok(content) => {
-            if song.rating > 0 && song.rating != content.rating {
-              eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path(), song.rating, content.rating);
+            if song.rating > 0 && content.rating == 0 {
+              eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+            } else if song.rating > 0 && song.rating != content.rating {
+              eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.rating);
             }
           }
           Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
@@ -197,7 +199,7 @@ mod tests {
         }
       }
       (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
-      _ => {},
+      _ => {}
     }
   }
 
