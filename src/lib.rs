@@ -46,35 +46,37 @@ impl Music {
   }
 
   pub fn all_songs(&self) -> Vec<Song> {
-    self.all_items().iter().map(|item| item.into()).collect()
+    self.all_items().iter().flat_map(|item| item.try_into()).collect()
   }
 }
 
 pub struct Song {
-  pub path: Option<String>,
+  pub path: String,
   pub rating: usize,
 }
 
-impl From<&Retained<ITLibMediaItem>> for Song {
-  fn from(item: &Retained<ITLibMediaItem>) -> Self {
+impl TryFrom<&Retained<ITLibMediaItem>> for Song {
+  type Error = ();
+
+  fn try_from(item: &Retained<ITLibMediaItem>) -> Result<Self, Self::Error> {
+    let rating = unsafe { item.rating() }.cast_unsigned() / 20;
     let path = unsafe { item.location() }
       .and_then(|url| url.path())
-      .map(|path| path.to_string());
-    let rating = unsafe { item.rating() }.cast_unsigned() / 20;
-    Song { path, rating }
+      .map(|path| path.to_string())
+      .ok_or(())?;
+
+    Ok(Song { path, rating })
   }
 }
 
 impl Song {
-  pub fn relative_path(&self) -> Option<&str> {
+  pub fn relative_path(&self) -> &str {
     let icloud = "/Mobile Documents/com~apple~CloudDocs";
-    self.path.as_ref()
-      .and_then(|path| path.split_once(icloud))
-      .map(|x| x.1)
+    self.path.split_once(icloud).map(|x| x.1).unwrap_or(&self.path)
   }
 
   pub fn deezer_id(&self) -> Option<&str> {
-    self.path.as_ref().and_then(|path| parse_filename(path))
+    parse_filename(&self.path)
       .and_then(|caps| caps.get(4).map(|id| id.as_str()))
   }
 }
@@ -99,11 +101,11 @@ mod tests {
   fn test_playlist_items() {
     let music = Music::default();
     let items = music.playlist_items("eatmos");
-    assert_eq!(552, items.len());
+    assert_eq!(553, items.len());
     let item = items.first().unwrap();
-    let song: Song = item.into();
-    assert_eq!("/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.path.as_ref().unwrap());
-    assert_eq!("/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path().unwrap());
+    let song: Song = item.try_into().unwrap();
+    assert_eq!("/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.path);
+    assert_eq!("/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path());
     assert_eq!(3, song.rating);
   }
 
@@ -127,7 +129,7 @@ mod tests {
 
     let music = Music::default();
     let items = music.all_items();
-    let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
+    let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
     // songs.into_iter().for_each(|song| {
     //   process_db(song, pool.get().unwrap());
     // });
@@ -174,28 +176,26 @@ mod tests {
   }
 
   fn process_db(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
-    if let Some(path) = song.path.as_ref() {
-      if let Some(dzid) = song.deezer_id() {
-        let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
-        match content {
-          Ok(content) => {
-            if song.rating > 0 && song.rating != content.rating {
-              eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path().unwrap(), song.rating, content.rating);
-            }
+    if let Some(dzid) = song.deezer_id() {
+      let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
+      match content {
+        Ok(content) => {
+          if song.rating > 0 && song.rating != content.rating {
+            eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path(), song.rating, content.rating);
           }
-          Err(_) => eprintln!("{} with {:?} not found in rekordbox", song.relative_path().unwrap(), dzid)
+        }
+        Err(_) => eprintln!("{} with {:?} not found in rekordbox", song.relative_path(), dzid)
+      }
+    }
+    match fs::exists(&song.path) {
+      Ok(_) => {
+        match ID3rs::read(&song.path) {
+          Ok(_) => {}
+          Err(_) => eprintln!("Cannot read {}", song.path),
         }
       }
-      match fs::exists(&path) {
-        Ok(_) => {
-          match ID3rs::read(&path) {
-            Ok(_) => {}
-            Err(_) => eprintln!("Cannot read {}", path),
-          }
-        }
-        Err(_) => eprintln!("{} does not exist", path),
-      };
-    }
+      Err(_) => eprintln!("{} does not exist", song.path),
+    };
   }
 
 
@@ -212,7 +212,7 @@ mod tests {
     // let rb = Arc::new(RwLock::new(happer::rekordbox::Rekordbox::new("test_master.db").unwrap()));
     let music = Music::default();
     let items = music.all_items();
-    let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
+    let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
     songs.into_iter().for_each(|song| {
       process(song);
     });
@@ -229,24 +229,23 @@ mod tests {
   fn test_par_process_all() {
     let music = Music::default();
     let items = music.all_items();
-    let songs: Vec<Song> = items.iter().map(|item| item.into()).collect();
+    let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
     songs.into_par_iter().for_each(|song| {
       process(song);
     });
   }
 
   fn process(song: Song) {
-    if let Some(path) = song.path {
-      match fs::exists(&path) {
-        Ok(_) => {
-          match ID3rs::read(&path) {
-            Ok(_) => {}
-            Err(_) => eprintln!("Cannot read {}", path),
-          }
+    let path = song.path;
+    match fs::exists(&path) {
+      Ok(_) => {
+        match ID3rs::read(&path) {
+          Ok(_) => {}
+          Err(_) => eprintln!("Cannot read {}", path),
         }
-        Err(_) => eprintln!("{} does not exist", path),
-      };
-    }
+      }
+      Err(_) => eprintln!("{} does not exist", path),
+    };
   }
 
   #[test]
@@ -260,6 +259,6 @@ mod tests {
   fn test_all_songs_len() {
     let music = Music::default();
     let items = music.all_songs();
-    assert_eq!(6985, items.len());
+    assert_eq!(6984, items.len());
   }
 }

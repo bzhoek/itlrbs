@@ -8,7 +8,7 @@ fn main() {
   for list in lists.into_iter() {
     let items = music.playlist_items(list);
     print!("{:>6}: {} songs", list, items.len());
-    let song: Song = items.first().unwrap().into();
-    println!(", first {} {}", song.relative_path().unwrap(), "*".repeat(song.rating));
+    let song: Song = items.first().unwrap().try_into().unwrap();
+    println!(", first {} {}", song.relative_path(), "*".repeat(song.rating));
   }
 }
