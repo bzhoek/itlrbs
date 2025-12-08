@@ -176,29 +176,29 @@ mod tests {
   }
 
   fn process_db(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
-    match fs::exists(&song.path) {
-      Ok(_) if song.rating == 1 => {
+    match (fs::exists(&song.path).ok(), song.deezer_id()) {
+      (Some(exists), _) if exists && song.rating == 1 => {
+        // fs::remove_file(&song.path).unwrap();
         eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
       }
-      Ok(_) => {
-        if let Some(dzid) = song.deezer_id() {
-          let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
-          match content {
-            Ok(content) => {
-              if song.rating > 0 && song.rating != content.rating {
-                eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path(), song.rating, content.rating);
-              }
+      (Some(exists), Some(dzid)) if exists => {
+        let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
+        match content {
+          Ok(content) => {
+            if song.rating > 0 && song.rating != content.rating {
+              eprintln!("{} has {} in Music and {} in rekordbox", song.relative_path(), song.rating, content.rating);
             }
-            Err(_) => eprintln!("{} with {:?} not found in rekordbox", song.relative_path(), dzid)
           }
+          Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
         }
         match ID3rs::read(&song.path) {
           Ok(_) => {}
           Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
         }
       }
-      Err(_) => eprintln!("{} does not exist", song.path),
-    };
+      (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
+      _ => {},
+    }
   }
 
   // #[test]
