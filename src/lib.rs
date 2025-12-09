@@ -1,7 +1,11 @@
+use chrono::{Datelike, Local};
 use objc2::rc::Retained;
 use objc2_foundation::NSString;
 use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
+use r2d2::PooledConnection;
+use r2d2_sqlite::SqliteConnectionManager;
 use regex::{Captures, Regex};
+use rusqlite::{Params, Row};
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -86,6 +90,43 @@ pub fn parse_filename(filename: &str) -> Option<Captures<'_>> {
   re.captures(filename)
 }
 
+#[allow(unused)]
+struct Content {
+  id: String,
+  rating: usize,
+}
+
+impl TryFrom<&Row<'_>> for Content {
+  type Error = rusqlite::Error;
+
+  fn try_from(value: &Row<'_>) -> Result<Self, Self::Error> {
+    Ok(Content {
+      id: value.get(0)?,
+      rating: value.get(15)?,
+    })
+  }
+}
+
+pub fn query_one<T, P>(
+  conn: &PooledConnection<SqliteConnectionManager>,
+  sql: &str,
+  params: P,
+) -> rusqlite::Result<T>
+where
+  P: Params,
+  for<'r> T: TryFrom<&'r Row<'r>, Error=rusqlite::Error>,
+{
+  conn.query_row(sql, params, |row| T::try_from(row))
+}
+
+#[allow(unused)]
+fn year_week() -> String {
+  let today = Local::now().date_naive();
+  let iso_week = today.iso_week();
+  let week_number = iso_week.week();
+  format!("{:02}{:02}", iso_week.year() % 100, week_number)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -94,8 +135,8 @@ mod tests {
   use r2d2::{Error, Pool, PooledConnection};
   use r2d2_sqlite::SqliteConnectionManager;
   use rayon::iter::{IntoParallelIterator, ParallelIterator};
-  use rusqlite::{Params, Row};
   use std::{env, fs};
+  use chrono::{Datelike, Local};
 
   #[test]
   fn test_playlist_items() {
@@ -134,7 +175,7 @@ mod tests {
     //   process_db(song, pool.get().unwrap());
     // });
     songs.into_par_iter().for_each(|song| {
-      process_db(song, pool.get().unwrap());
+      process_song(song, pool.get().unwrap());
     });
   }
 
@@ -148,34 +189,7 @@ mod tests {
 
     Pool::new(manager)
   }
-  struct Content {
-    id: String,
-    rating: usize,
-  }
-
-  impl TryFrom<&Row<'_>> for Content {
-    type Error = rusqlite::Error;
-
-    fn try_from(value: &Row<'_>) -> Result<Self, Self::Error> {
-      Ok(Content {
-        id: value.get(0)?,
-        rating: value.get(15)?,
-      })
-    }
-  }
-  pub fn query_one<T, P>(
-    conn: &PooledConnection<SqliteConnectionManager>,
-    sql: &str,
-    params: P,
-  ) -> rusqlite::Result<T>
-  where
-    P: Params,
-    for<'r> T: TryFrom<&'r Row<'r>, Error=rusqlite::Error>,
-  {
-    conn.query_row(sql, params, |row| T::try_from(row))
-  }
-
-  fn process_db(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
+  fn process_song(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
     match (fs::exists(&song.path).ok(), song.deezer_id()) {
       (Some(exists), _) if exists && song.rating == 1 => {
         // fs::remove_file(&song.path).unwrap();
@@ -194,7 +208,17 @@ mod tests {
           Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
         }
         match ID3rs::read(&song.path) {
-          Ok(_) => {}
+          Ok(mut id3) => {
+            match id3.popularity("itunes") {
+              Some((author, rating)) if rating != song.rating as u8 => {
+                eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
+                id3.set_popularity("itunes", song.rating as u8);
+                id3.set_grouping(&year_week());
+                id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
+              }
+              _ => {}
+            }
+          }
           Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
         }
       }
@@ -264,5 +288,14 @@ mod tests {
     let music = Music::default();
     let items = music.all_songs();
     assert_eq!(6984, items.len());
+  }
+
+  #[test]
+  fn test_week_number() {
+    let today = Local::now().date_naive();
+    let iso_week = today.iso_week();
+    let week_number = iso_week.week();
+    let year_week = format!("{:02}{:02}", iso_week.year() % 100, week_number);
+    assert_eq!("2550", year_week);
   }
 }
