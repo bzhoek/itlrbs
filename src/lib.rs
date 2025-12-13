@@ -88,12 +88,6 @@ pub fn parse_filename(filename: &str) -> Option<Captures<'_>> {
 }
 
 #[allow(unused)]
-struct Content {
-  id: String,
-  rating: usize,
-}
-
-#[allow(unused)]
 fn year_week() -> String {
   let today = Local::now().date_naive();
   let iso_week = today.iso_week();
@@ -106,7 +100,6 @@ mod tests {
   use super::*;
   use chrono::{Datelike, Local};
   use id3rs::ID3rs;
-  use rayon::iter::{IntoParallelIterator, ParallelIterator};
   use rbsqlx::Database;
   use std::fs;
 
@@ -122,7 +115,7 @@ mod tests {
     assert_eq!(3, song.rating);
   }
 
-  #[tokio::test]
+  #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
   async fn test_sqlcipher() {
     let database = Database::connect("test_master.db").await.unwrap();
 
@@ -132,10 +125,9 @@ mod tests {
 
     let handles = songs.into_iter().map(|song| {
       let database = database.clone();
-      let handle = tokio::spawn(async move {
+      tokio::spawn(async move {
         process_song(song, database).await;
-      });
-      handle
+      })
     }).collect::<Vec<_>>();
 
     for handle in handles {
@@ -196,16 +188,6 @@ mod tests {
     let song = Song { path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(), rating: 3 };
     let id = song.deezer_id().unwrap();
     assert_eq!("918205852", id);
-  }
-
-  #[test]
-  fn test_par_process_all() {
-    let music = Music::default();
-    let items = music.all_items();
-    let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-    songs.into_par_iter().for_each(|song| {
-      process(song);
-    });
   }
 
   fn process(song: Song) {
