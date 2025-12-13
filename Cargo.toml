@@ -18,4 +18,4 @@ anyhow = "1.0.100"
 regex = "1.12.2"
 dotenvy = "0.15.7"
 chrono = "0.4.42"
-tokio = "1.48.0"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }

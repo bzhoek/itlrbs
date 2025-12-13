@@ -104,12 +104,11 @@ fn year_week() -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use dotenvy::dotenv;
+  use chrono::{Datelike, Local};
   use id3rs::ID3rs;
   use rayon::iter::{IntoParallelIterator, ParallelIterator};
-  use std::{env, fs};
-  use chrono::{Datelike, Local};
   use rbsqlx::Database;
+  use std::fs;
 
   #[test]
   fn test_playlist_items() {
@@ -125,19 +124,26 @@ mod tests {
 
   #[tokio::test]
   async fn test_sqlcipher() {
-    let mut database = Database::connect("test_master.db").await.unwrap();
+    let database = Database::connect("test_master.db").await.unwrap();
+
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-    for song in songs.into_iter() {
-      process_song(song, &mut database).await;
+
+    let handles = songs.into_iter().map(|song| {
+      let database = database.clone();
+      let handle = tokio::spawn(async move {
+        process_song(song, database).await;
+      });
+      handle
+    }).collect::<Vec<_>>();
+
+    for handle in handles {
+      handle.await.unwrap();
     }
-    // songs.into_par_iter().for_each(|song| {
-    //   process_song(song, database);
-    // });
   }
 
-  async fn process_song(song: Song, conn: &mut Database) {
+  async fn process_song(song: Song, mut conn: Database) {
     match (fs::exists(&song.path).ok(), song.deezer_id()) {
       (Some(exists), _) if exists && song.rating == 1 => {
         // fs::remove_file(&song.path).unwrap();
