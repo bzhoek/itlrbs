@@ -135,17 +135,18 @@ mod tests {
     }
   }
 
-  async fn process_song(song: Song, mut conn: Database) {
+  async fn process_song(song: Song, mut database: Database) {
     match (fs::exists(&song.path).ok(), song.deezer_id()) {
       (Some(exists), _) if exists && song.rating == 1 => {
         // fs::remove_file(&song.path).unwrap();
         eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
       }
       (Some(exists), Some(dzid)) if exists => {
-        match conn.content(dzid).await {
+        match database.content(dzid).await {
           Ok(content) => {
             if song.rating > 0 && content.Rating == 0 {
               eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+              database.rate_content(&content, song.rating as u8).await.unwrap();
             } else if song.rating > 0 && song.rating != content.Rating as usize {
               eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.Rating);
             }
