@@ -786,6 +786,7 @@ dependencies = [
 [[package]]
 name = "id3rs"
 version = "0.1.1"
+source = "git+https://github.com/bzhoek/id3rs#9e46a5c3694ce72eefc04e8d71de2f359073e91c"
 dependencies = [
  "clap",
  "env_logger 0.8.4",

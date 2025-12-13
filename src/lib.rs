@@ -1,7 +1,10 @@
+use std::fs;
 use chrono::{Datelike, Local};
+use id3rs::ID3rs;
 use objc2::rc::Retained;
 use objc2_foundation::NSString;
 use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
+use rbsqlx::Database;
 use regex::{Captures, Regex};
 
 pub struct Music {
@@ -95,6 +98,94 @@ fn year_week() -> String {
   format!("{:02}{:02}", iso_week.year() % 100, week_number)
 }
 
+pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database) {
+  let songs: Vec<Song> = items.iter()
+    .flat_map(|item| item.try_into())
+    .collect();
+
+  let handles = songs.into_iter().map(|song| {
+    let database = database.clone();
+    tokio::spawn(async move {
+      process_song(song, database).await;
+    })
+  }).collect::<Vec<_>>();
+
+  for handle in handles {
+    handle.await.unwrap();
+  }
+}
+
+pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str) {
+  let songs: Vec<Song> = items.iter()
+    .flat_map(|item| item.try_into())
+    .collect();
+
+  let handles = songs.into_iter().map(|song| {
+    let tag = tag.to_string();
+    let database = database.clone();
+    tokio::spawn(async move {
+      tag_song(song, database, tag).await;
+    })
+  }).collect::<Vec<_>>();
+
+  for handle in handles {
+    handle.await.unwrap();
+  }
+}
+
+async fn tag_song(song: Song, mut database: Database, tag: String) {
+  match (fs::exists(&song.path).ok(), song.deezer_id()) {
+    (Some(exists), Some(dzid)) if exists => {
+      match database.content(dzid).await {
+        Ok(content) => {
+          database.tag_content(&content, &tag).await.unwrap();
+        }
+        Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
+      }
+    }
+    (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
+    _ => {}
+  }
+}
+
+async fn process_song(song: Song, mut database: Database) {
+  match (fs::exists(&song.path).ok(), song.deezer_id()) {
+    (Some(exists), _) if exists && song.rating == 1 => {
+      // fs::remove_file(&song.path).unwrap();
+      eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
+    }
+    (Some(exists), Some(dzid)) if exists => {
+      match database.content(dzid).await {
+        Ok(content) => {
+          if song.rating > 0 && content.Rating == 0 {
+            eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+            database.rate_content(&content, song.rating as u8).await.unwrap();
+          } else if song.rating > 0 && song.rating != content.Rating as usize {
+            eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.Rating);
+          }
+        }
+        Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
+      }
+      match ID3rs::read(&song.path) {
+        Ok(mut id3) => {
+          match id3.popularity("itunes") {
+            Some((author, rating)) if rating != song.rating as u8 => {
+              eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
+              id3.set_popularity("itunes", song.rating as u8);
+              id3.set_grouping(&year_week());
+              id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
+            }
+            _ => {}
+          }
+        }
+        Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
+      }
+    }
+    (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
+    _ => {}
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -117,60 +208,10 @@ mod tests {
 
   #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
   async fn test_sqlcipher() {
-    let database = Database::connect("test_master.db").await.unwrap();
-
     let music = Music::default();
     let items = music.all_items();
-    let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-
-    let handles = songs.into_iter().map(|song| {
-      let database = database.clone();
-      tokio::spawn(async move {
-        process_song(song, database).await;
-      })
-    }).collect::<Vec<_>>();
-
-    for handle in handles {
-      handle.await.unwrap();
-    }
-  }
-
-  async fn process_song(song: Song, mut database: Database) {
-    match (fs::exists(&song.path).ok(), song.deezer_id()) {
-      (Some(exists), _) if exists && song.rating == 1 => {
-        // fs::remove_file(&song.path).unwrap();
-        eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
-      }
-      (Some(exists), Some(dzid)) if exists => {
-        match database.content(dzid).await {
-          Ok(content) => {
-            if song.rating > 0 && content.Rating == 0 {
-              eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
-              database.rate_content(&content, song.rating as u8).await.unwrap();
-            } else if song.rating > 0 && song.rating != content.Rating as usize {
-              eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.Rating);
-            }
-          }
-          Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
-        }
-        // match ID3rs::read(&song.path) {
-        //   Ok(mut id3) => {
-        //     match id3.popularity("itunes") {
-        //       Some((author, rating)) if rating != song.rating as u8 => {
-        //         eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
-        //         id3.set_popularity("itunes", song.rating as u8);
-        //         id3.set_grouping(&year_week());
-        //         id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
-        //       }
-        //       _ => {}
-        //     }
-        //   }
-        //   Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
-        // }
-      }
-      (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
-      _ => {}
-    }
+    let database = &Database::connect("test_master.db").await.unwrap();
+    rate_music(items, database).await;
   }
 
   #[test]

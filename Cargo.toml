@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 #rbsqlx = { git = "https://github.com/bzhoek/rbsqlx" }
 rbsqlx = { path = "../rbsqlx" }
-#id3rs = { git = "https://github.com/bzhoek/id3rs" }
-id3rs = { path = "../id3rs" }
+id3rs = { git = "https://github.com/bzhoek/id3rs" }
+#id3rs = { path = "../id3rs" }
 #happer = { path = "../happer" }
 
 objc2 = "0.6.3"

@@ -1,14 +1,18 @@
-use itlrbs::{Music, Song};
+use rbsqlx::Database;
+use itlrbs::{tag_music, Music, Song};
 
-fn main() {
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+async fn main() {
+  let database = &Database::connect("test_master.db").await.unwrap();
+
   let lists = ["eatmos", "ebup", "edrive", "epeak", "ebang", "ebdown"];
   let music = Music::default();
   let items = music.all_songs();
   println!("Version {} has {} songs", music.version(), items.len());
+
   for list in lists.into_iter() {
     let items = music.playlist_items(list);
-    print!("{:>6}: {} songs", list, items.len());
-    let song: Song = items.first().unwrap().try_into().unwrap();
-    println!(", first {} {}", song.relative_path(), "*".repeat(song.rating));
+    println!("{:>6}: {} songs", list, items.len());
+    tag_music(items, database, list).await;
   }
 }
