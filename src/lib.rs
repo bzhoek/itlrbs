@@ -2,10 +2,7 @@ use chrono::{Datelike, Local};
 use objc2::rc::Retained;
 use objc2_foundation::NSString;
 use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
-use r2d2::PooledConnection;
-use r2d2_sqlite::SqliteConnectionManager;
 use regex::{Captures, Regex};
-use rusqlite::{Params, Row};
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -96,29 +93,6 @@ struct Content {
   rating: usize,
 }
 
-impl TryFrom<&Row<'_>> for Content {
-  type Error = rusqlite::Error;
-
-  fn try_from(value: &Row<'_>) -> Result<Self, Self::Error> {
-    Ok(Content {
-      id: value.get(0)?,
-      rating: value.get(15)?,
-    })
-  }
-}
-
-pub fn query_one<T, P>(
-  conn: &PooledConnection<SqliteConnectionManager>,
-  sql: &str,
-  params: P,
-) -> rusqlite::Result<T>
-where
-  P: Params,
-  for<'r> T: TryFrom<&'r Row<'r>, Error=rusqlite::Error>,
-{
-  conn.query_row(sql, params, |row| T::try_from(row))
-}
-
 #[allow(unused)]
 fn year_week() -> String {
   let today = Local::now().date_naive();
@@ -132,11 +106,10 @@ mod tests {
   use super::*;
   use dotenvy::dotenv;
   use id3rs::ID3rs;
-  use r2d2::{Error, Pool, PooledConnection};
-  use r2d2_sqlite::SqliteConnectionManager;
   use rayon::iter::{IntoParallelIterator, ParallelIterator};
   use std::{env, fs};
   use chrono::{Datelike, Local};
+  use rbsqlx::Database;
 
   #[test]
   fn test_playlist_items() {
@@ -150,90 +123,56 @@ mod tests {
     assert_eq!(3, song.rating);
   }
 
-  #[test]
-  fn test_sqlcipher() {
-    let pool = pool_for("test_master.db").unwrap();
-    let conn = pool.get().unwrap();
-
-    let count: i64 = conn.query_row(
-      "SELECT COUNT(*) FROM djmdContent",
-      [],
-      |row| row.get(0),
-    ).unwrap();
-    assert_eq!(7347, count);
-    let id: String = conn.query_row(
-      "SELECT * FROM djmdContent WHERE FileNameL like ?",
-      [format!("%[{}]%", "918205852")],
-      |row| row.get(0),
-    ).unwrap();
-    assert_eq!("43970339", id);
-
+  #[tokio::test]
+  async fn test_sqlcipher() {
+    let mut database = Database::connect("test_master.db").await.unwrap();
     let music = Music::default();
     let items = music.all_items();
     let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-    // songs.into_iter().for_each(|song| {
-    //   process_db(song, pool.get().unwrap());
+    for song in songs.into_iter() {
+      process_song(song, &mut database).await;
+    }
+    // songs.into_par_iter().for_each(|song| {
+    //   process_song(song, database);
     // });
-    songs.into_par_iter().for_each(|song| {
-      process_song(song, pool.get().unwrap());
-    });
   }
 
-  fn pool_for(path: &str) -> Result<Pool<SqliteConnectionManager>, Error> {
-    dotenv().ok();
-    let manager = SqliteConnectionManager::file(path)
-      .with_init(|conn| {
-        let pragma = format!("PRAGMA key = '{}';", env::var("SQLCIPHER_KEY").unwrap());
-        conn.execute_batch(pragma.as_str())
-      });
-
-    Pool::new(manager)
-  }
-  fn process_song(song: Song, conn: PooledConnection<SqliteConnectionManager>) {
+  async fn process_song(song: Song, conn: &mut Database) {
     match (fs::exists(&song.path).ok(), song.deezer_id()) {
       (Some(exists), _) if exists && song.rating == 1 => {
         // fs::remove_file(&song.path).unwrap();
         eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
       }
       (Some(exists), Some(dzid)) if exists => {
-        let content: Result<Content, _> = query_one(&conn, "SELECT * FROM djmdContent WHERE FileNameL like ?", [format!("%[{}]%", dzid)]);
-        match content {
+        match conn.content(dzid).await {
           Ok(content) => {
-            if song.rating > 0 && content.rating == 0 {
+            if song.rating > 0 && content.Rating == 0 {
               eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
-            } else if song.rating > 0 && song.rating != content.rating {
-              eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.rating);
+            } else if song.rating > 0 && song.rating != content.Rating as usize {
+              eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.Rating);
             }
           }
           Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
         }
-        match ID3rs::read(&song.path) {
-          Ok(mut id3) => {
-            match id3.popularity("itunes") {
-              Some((author, rating)) if rating != song.rating as u8 => {
-                eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
-                id3.set_popularity("itunes", song.rating as u8);
-                id3.set_grouping(&year_week());
-                id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
-              }
-              _ => {}
-            }
-          }
-          Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
-        }
+        // match ID3rs::read(&song.path) {
+        //   Ok(mut id3) => {
+        //     match id3.popularity("itunes") {
+        //       Some((author, rating)) if rating != song.rating as u8 => {
+        //         eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
+        //         id3.set_popularity("itunes", song.rating as u8);
+        //         id3.set_grouping(&year_week());
+        //         id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
+        //       }
+        //       _ => {}
+        //     }
+        //   }
+        //   Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
+        // }
       }
       (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
       _ => {}
     }
   }
-
-  // #[test]
-  // fn test_master_db() {
-  //   let rb = happer::rekordbox::Rekordbox::new("test_master.db").unwrap();
-  //   let content = rb.with_deezer("918205852").unwrap();
-  //   assert_eq!(3, content.Rating);
-  //   assert_eq!("29. 2020 Souls -- Aaaron [918205852].mp3", content.FileNameL);
-  // }
 
   #[test]
   fn test_process_all() {

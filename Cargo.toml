@@ -9,13 +9,13 @@ objc2-foundation = "0.3.2"
 objc2-itunes-library = "0.3.2"
 rayon = "1.11.0"
 
+#rbsqlx = { git = "https://github.com/bzhoek/rbsqlx" }
+rbsqlx = { path = "../rbsqlx" }
 #id3rs = { git = "https://github.com/bzhoek/id3rs" }
 id3rs = { path = "../id3rs" }
 #happer = { path = "../happer" }
 anyhow = "1.0.100"
 regex = "1.12.2"
-rusqlite = { version = "0.37.0", features = ["bundled-sqlcipher"] }
-r2d2 = "0.8.10"
-r2d2_sqlite = { version = "0.31.0", features = ["bundled-sqlcipher"] }
 dotenvy = "0.15.7"
 chrono = "0.4.42"
+tokio = "1.48.0"
