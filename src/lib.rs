@@ -1,4 +1,3 @@
-use std::fs;
 use chrono::{Datelike, Local};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
@@ -6,6 +5,8 @@ use objc2_foundation::NSString;
 use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
 use rbsqlx::Database;
 use regex::{Captures, Regex};
+use std::fs;
+use tracing::{error, info, warn};
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -15,8 +16,7 @@ impl Default for Music {
   fn default() -> Self {
     let itl = unsafe {
       let version = NSString::from_str("1");
-      ITLibrary::libraryWithAPIVersion_error(&version)
-        .expect("Failed to load library")
+      ITLibrary::libraryWithAPIVersion_error(&version).expect("Failed to load library")
     };
     Music { itl }
   }
@@ -31,21 +31,13 @@ impl Music {
     let playlists = unsafe { self.itl.allPlaylists() };
     let name = NSString::from_str(name);
     let items: Vec<_> = unsafe {
-      playlists
-        .iter()
-        .find(|pl| pl.name().isEqualToString(&name))
-        .map(|pl| pl.items())
-        .iter().flatten().collect()
+      playlists.iter().find(|pl| pl.name().isEqualToString(&name)).map(|pl| pl.items()).iter().flatten().collect()
     };
     items
   }
 
   pub fn all_items(&self) -> Vec<Retained<ITLibMediaItem>> {
-    let items: Vec<_> = unsafe {
-      self.itl.allMediaItems()
-        .iter().filter(|item| !item.isRatingComputed())
-        .collect()
-    };
+    let items: Vec<_> = unsafe { self.itl.allMediaItems().iter().filter(|item| !item.isRatingComputed()).collect() };
     items
   }
 
@@ -64,12 +56,12 @@ impl TryFrom<&Retained<ITLibMediaItem>> for Song {
 
   fn try_from(item: &Retained<ITLibMediaItem>) -> Result<Self, Self::Error> {
     let rating = unsafe { item.rating() }.cast_unsigned() / 20;
-    let path = unsafe { item.location() }
-      .and_then(|url| url.path())
-      .map(|path| path.to_string())
-      .ok_or(())?;
+    let path = unsafe { item.location() }.and_then(|url| url.path()).map(|path| path.to_string()).ok_or(())?;
 
-    Ok(Song { path, rating })
+    Ok(Song {
+      path,
+      rating,
+    })
   }
 }
 
@@ -80,8 +72,7 @@ impl Song {
   }
 
   pub fn deezer_id(&self) -> Option<&str> {
-    parse_filename(&self.path)
-      .and_then(|caps| caps.get(4).map(|id| id.as_str()))
+    parse_filename(&self.path).and_then(|caps| caps.get(4).map(|id| id.as_str()))
   }
 }
 
@@ -99,16 +90,17 @@ fn year_week() -> String {
 }
 
 pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database) {
-  let songs: Vec<Song> = items.iter()
-    .flat_map(|item| item.try_into())
-    .collect();
+  let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
 
-  let handles = songs.into_iter().map(|song| {
-    let database = database.clone();
-    tokio::spawn(async move {
-      process_song(song, database).await;
+  let handles = songs
+    .into_iter()
+    .map(|song| {
+      let database = database.clone();
+      tokio::spawn(async move {
+        process_song(song, database).await;
+      })
     })
-  }).collect::<Vec<_>>();
+    .collect::<Vec<_>>();
 
   for handle in handles {
     handle.await.unwrap();
@@ -116,17 +108,18 @@ pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Databas
 }
 
 pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str) {
-  let songs: Vec<Song> = items.iter()
-    .flat_map(|item| item.try_into())
-    .collect();
+  let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
 
-  let handles = songs.into_iter().map(|song| {
-    let tag = tag.to_string();
-    let database = database.clone();
-    tokio::spawn(async move {
-      tag_song(song, database, tag).await;
+  let handles = songs
+    .into_iter()
+    .map(|song| {
+      let tag = tag.to_string();
+      let database = database.clone();
+      tokio::spawn(async move {
+        tag_song(song, database, tag).await;
+      })
     })
-  }).collect::<Vec<_>>();
+    .collect::<Vec<_>>();
 
   for handle in handles {
     handle.await.unwrap();
@@ -135,15 +128,13 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
 
 async fn tag_song(song: Song, mut database: Database, tag: String) {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
-    (Some(exists), Some(dzid)) if exists => {
-      match database.content(dzid).await {
-        Ok(content) => {
-          database.tag_content(&content, &tag).await.unwrap();
-        }
-        Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
+    (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
+      Ok(content) => {
+        database.tag_content(&content, &tag).await.unwrap();
       }
-    }
-    (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
+      Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
+    },
+    (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
     _ => {}
   }
 }
@@ -151,37 +142,46 @@ async fn tag_song(song: Song, mut database: Database, tag: String) {
 async fn process_song(song: Song, mut database: Database) {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), _) if exists && song.rating == 1 => {
-      // fs::remove_file(&song.path).unwrap();
-      eprintln!("Delete {} with {} star rating", song.relative_path(), song.rating);
+      warn!("Delete {} with {} star rating", song.relative_path(), song.rating);
+      fs::remove_file(&song.path).unwrap();
     }
     (Some(exists), Some(dzid)) if exists => {
       match database.content(dzid).await {
         Ok(content) => {
           if song.rating > 0 && content.Rating == 0 {
-            eprintln!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+            info!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
             database.rate_content(&content, song.rating as u8).await.unwrap();
           } else if song.rating > 0 && song.rating != content.Rating as usize {
-            eprintln!("Different rating for {} in Music {} and rekordbox {}", song.relative_path(), song.rating, content.Rating);
+            warn!(
+              "Different rating for {} in Music {} and rekordbox {}",
+              song.relative_path(),
+              song.rating,
+              content.Rating
+            );
           }
         }
-        Err(_) => eprintln!("Not in rekordbox {} with {:?}", song.relative_path(), dzid)
+        Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
       }
       match ID3rs::read(&song.path) {
-        Ok(mut id3) => {
-          match id3.popularity("itunes") {
-            Some((author, rating)) if rating != song.rating as u8 => {
-              eprintln!("Different rating for {} in Music {} and ID3 {} by {}", song.relative_path(), song.rating, rating, author);
-              id3.set_popularity("itunes", song.rating as u8);
-              id3.set_grouping(&year_week());
-              id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
-            }
-            _ => {}
+        Ok(mut id3) => match id3.popularity("itunes") {
+          Some((author, rating)) if rating != song.rating as u8 => {
+            info!(
+              "Rate {} from Music {} over ID3 {} by {}",
+              song.relative_path(),
+              song.rating,
+              rating,
+              author
+            );
+            id3.set_popularity("itunes", song.rating as u8);
+            id3.set_grouping(&year_week());
+            id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
           }
-        }
-        Err(_) => eprintln!("Cannot read ID3 for {}", song.path),
+          _ => {}
+        },
+        Err(_) => error!("Cannot read ID3 for {}", song.path),
       }
     }
-    (Some(exists), _) if !exists => eprintln!("Does not exist {}", song.path),
+    (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
     _ => {}
   }
 }
@@ -201,7 +201,10 @@ mod tests {
     assert_eq!(553, items.len());
     let item = items.first().unwrap();
     let song: Song = item.try_into().unwrap();
-    assert_eq!("/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.path);
+    assert_eq!(
+      "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3",
+      song.path
+    );
     assert_eq!("/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path());
     assert_eq!(3, song.rating);
   }
@@ -235,13 +238,11 @@ mod tests {
   fn process(song: Song) {
     let path = song.path;
     match fs::exists(&path) {
-      Ok(_) => {
-        match ID3rs::read(&path) {
-          Ok(_) => {}
-          Err(_) => eprintln!("Cannot read {}", path),
-        }
-      }
-      Err(_) => eprintln!("{} does not exist", path),
+      Ok(_) => match ID3rs::read(&path) {
+        Ok(_) => {}
+        Err(_) => error!("Cannot read {}", path),
+      },
+      Err(_) => error!("{} does not exist", path),
     };
   }
 
