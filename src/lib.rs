@@ -174,7 +174,7 @@ async fn process_song(song: Song, mut database: Database) {
             );
             id3.set_popularity("itunes", song.rating as u8);
             id3.set_grouping(&year_week());
-            id3.write().expect(format!("Failed to write {}", song.relative_path()).as_str());
+            id3.write().unwrap_or_else(|_| error!("Failed to write {}", song.relative_path()));
           }
           _ => {}
         },

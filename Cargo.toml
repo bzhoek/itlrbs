@@ -8,7 +8,6 @@ edition = "2024"
 rbsqlx = { path = "../rbsqlx" }
 id3rs = { git = "https://github.com/bzhoek/id3rs" }
 #id3rs = { path = "../id3rs" }
-#happer = { path = "../happer" }
 
 objc2 = "0.6.3"
 objc2-foundation = "0.3.2"
@@ -20,3 +19,4 @@ chrono = "0.4.42"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.43"
 tracing-subscriber = "0.3.22"
+clap = { version = "4.5.53", features = ["derive"] }
