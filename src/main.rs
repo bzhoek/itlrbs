@@ -25,13 +25,15 @@ async fn main() {
   let items = music.all_songs();
   info!("Version {} has {} songs", music.version(), items.len());
 
-
-  let _lists = ["vocals"];
-  let lists = ["eatmos", "ebup", "edrive", "epeak", "ebang", "ebdown"];
-  let short = ["ebdown"];
-  for list in lists.into_iter() {
-    let items = music.playlist_items(list);
-    info!("{:>6}: {} songs", list, items.len());
-    tag_music(items, database, list, lists.into()).await;
+  let sets = vec![
+    vec!["eatmos", "ebup", "edrive", "epeak", "ebang", "ebdown"],
+    vec!["vocals"],
+  ];
+  for set in sets {
+    for list in set.iter() {
+      let items = music.playlist_items(list);
+      info!("{:>6}: {} songs", list, items.len());
+      tag_music(items, database, list, &set).await;
+    }
   }
 }

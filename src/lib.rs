@@ -107,7 +107,7 @@ pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Databas
   }
 }
 
-pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: Vec<&'static str>) {
+pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: &[&'static str]) {
   let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
 
   let handles = songs
@@ -115,7 +115,7 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
     .map(|song| {
       let tag = tag.to_string();
       let database = database.clone();
-      let set = set.clone();
+      let set = set.to_owned();
       tokio::spawn(async move {
         tag_song(song, database, tag, set).await;
       })
@@ -140,7 +140,9 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
           info!("Remove tag {} from {}", name, song.relative_path());
           database.untag_content(&content, name).await.unwrap();
         }
-        database.tag_content(&content, &tag).await.unwrap();
+        if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
+          info!("Tagged {} with {} usn {}", song.relative_path(), tag, usn);
+        }
       }
       Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
     },
