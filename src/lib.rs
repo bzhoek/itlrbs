@@ -107,7 +107,7 @@ pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Databas
   }
 }
 
-pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str) {
+pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: Vec<&'static str>) {
   let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
 
   let handles = songs
@@ -115,8 +115,9 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
     .map(|song| {
       let tag = tag.to_string();
       let database = database.clone();
+      let set = set.clone();
       tokio::spawn(async move {
-        tag_song(song, database, tag).await;
+        tag_song(song, database, tag, set).await;
       })
     })
     .collect::<Vec<_>>();
@@ -126,10 +127,19 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
   }
 }
 
-async fn tag_song(song: Song, mut database: Database, tag: String) {
+async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str>) {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
       Ok(content) => {
+        let tags = database.content_tags(&content).await.unwrap_or_default();
+        let names = tags.iter()
+          .map(|t| t.Name.as_str())
+          .filter(|name| name != &tag && set.contains(name))
+          .collect::<Vec<_>>();
+        for name in names {
+          info!("Remove tag {} from {}", name, song.relative_path());
+          database.untag_content(&content, name).await.unwrap();
+        }
         database.tag_content(&content, &tag).await.unwrap();
       }
       Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
