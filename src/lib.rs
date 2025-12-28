@@ -270,14 +270,15 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
         }
         Err(_) => warn!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
       }
-      update_id3(&song, dry_run).await;
+      update_id3(&song, dry_run, force).await;
     }
     (_, None) => debug!("No Deezer ID {}", song.path),
     _ => error!("Does not exist {}", song.path),
   }
 
-  async fn update_id3(song: &Song, dry_run: bool) {
+  async fn update_id3(song: &Song, dry_run: bool, force: bool) {
     let rate_song = |id3: &mut ID3rs, author| {
+      id3.clear_popularities();
       id3.set_popularity(author, song.rating as u8);
       if id3.grouping().is_none() {
         id3.set_grouping(&year_week());
@@ -291,7 +292,7 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
       Ok(mut id3) => {
         for author in ["itunes", "traktor@native-instruments.de"].iter() {
           match id3.popularity(author) {
-            Some((_, rating)) if rating != song.rating as u8 => {
+            Some((_, rating)) if rating != song.rating as u8 || force => {
               info!(
                 "Update {} from Music {} over ID3 {} by {}",
                 song.relative_path(),
