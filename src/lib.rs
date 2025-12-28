@@ -101,7 +101,7 @@ impl TryFrom<&Retained<ITLibMediaItem>> for Song {
 
 impl Song {
   pub fn relative_path(&self) -> &str {
-    let icloud = "/Mobile Documents/com~apple~CloudDocs";
+    let icloud = "/Mobile Documents/com~apple~CloudDocs/Music";
     self.path.split_once(icloud).map(|x| x.1).unwrap_or(&self.path)
   }
 
