@@ -2,7 +2,7 @@ use chrono::{Datelike, Local};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
 use objc2_foundation::NSString;
-use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
+use objc2_itunes_library::{ITLibMediaItem, ITLibPlaylist, ITLibrary};
 use rbsqlx::Database;
 use regex::{Captures, Regex};
 use std::fs;
@@ -28,23 +28,34 @@ impl Music {
   }
 
   pub fn playlist_items(&self, name: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let playlists = unsafe { self.itl.allPlaylists() };
     let name = NSString::from_str(name);
     let items: Vec<_> = unsafe {
-      playlists.iter().find(|pl| pl.name().isEqualToString(&name))
+      self.itl.allPlaylists().iter()
+        .find(|pl| pl.name().isEqualToString(&name))
         .map(|pl| pl.items()).iter().flatten().collect()
     };
     items
   }
 
+  fn playlist_by_name(&self, name: &str) -> Option<Retained<ITLibPlaylist>> {
+    let name = NSString::from_str(name);
+    let playlist = unsafe {
+      self.itl.allPlaylists().iter()
+        .find(|pl| pl.name().isEqualToString(&name))
+    };
+    playlist
+  }
+  
   pub fn playlist_items_by_title(&self, name: &str, title: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let playlists = unsafe { self.itl.allPlaylists() };
     let name = NSString::from_str(name);
     let title = NSString::from_str(&*title);
     let items: Vec<_> = unsafe {
-      playlists.iter().find(|pl| pl.name().isEqualToString(&name))
-        .map(|pl| pl.items().iter().filter(|pl| pl.title().isEqualToString(&title)).collect::<Vec<_>>())
-        .into_iter().flatten().collect()
+      self.itl.allPlaylists().iter()
+        .find(|pl| pl.name().isEqualToString(&name))
+        .map(|pl| pl.items())
+        .into_iter().flatten()
+        .filter(|it| it.title().isEqualToString(&title))
+        .collect::<Vec<_>>()
     };
     items
   }

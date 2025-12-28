@@ -31,7 +31,7 @@ async fn main() {
   }
 
   let music = Music::default();
-  let items = match cli.title {
+  let items = match &cli.title {
     Some(title) => {
       let items = music.all_items_by_title(&*title);
       Music::as_songs(&items)
@@ -47,7 +47,10 @@ async fn main() {
   ];
   for set in sets {
     for list in set.iter() {
-      let items = music.playlist_items(list);
+      let items = match &cli.title {
+        Some(title) => music.playlist_items_by_title(list, title),
+        None => music.playlist_items(list)
+      };
       info!("Tagging {} songs with '{}'", items.len(), list);
       tag_music(items, database, list, &set, cli.dry_run).await;
     }
