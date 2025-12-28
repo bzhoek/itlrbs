@@ -6,7 +6,7 @@ use objc2_itunes_library::{ITLibMediaItem, ITLibrary};
 use rbsqlx::Database;
 use regex::{Captures, Regex};
 use std::fs;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -178,27 +178,44 @@ async fn process_song(song: Song, mut database: Database) {
         }
         Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
       }
-      match ID3rs::read(&song.path) {
-        Ok(mut id3) => match id3.popularity("itunes") {
-          Some((author, rating)) if rating != song.rating as u8 => {
-            info!(
-              "Rate {} from Music {} over ID3 {} by {}",
-              song.relative_path(),
-              song.rating,
-              rating,
-              author
-            );
-            id3.set_popularity("itunes", song.rating as u8);
-            id3.set_grouping(&year_week());
-            id3.write().unwrap_or_else(|_| error!("Failed to write {}", song.relative_path()));
-          }
-          _ => {}
-        },
-        Err(_) => error!("Cannot read ID3 for {}", song.path),
-      }
+      update_id3(&song).await;
     }
     (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
-    _ => {}
+    _ => error!("Does not exist {}", song.path),
+  }
+
+  async fn update_id3(song: &Song) {
+    let rate_song = |id3: &mut ID3rs, author| {
+      id3.set_popularity(author, song.rating as u8);
+      if id3.grouping().is_none() {
+        id3.set_grouping(&year_week());
+      }
+      id3.write().unwrap_or_else(|_| error!("Failed to write {}", song.relative_path()));
+    };
+
+    match ID3rs::read(&song.path) {
+      Err(_) => error!("Cannot read ID3 for {}", song.path),
+      Ok(mut id3) => {
+        for author in ["itunes", "traktor@native-instruments.de"].iter() {
+          match id3.popularity(author) {
+            Some((_, rating)) if rating != song.rating as u8 => {
+              info!(
+                "Update {} from Music {} over ID3 {} by {}",
+                song.relative_path(),
+                song.rating,
+                rating,
+                author );
+              rate_song(&mut id3, author);
+              return;
+            }
+            Some((_, _)) => return,
+            _ => debug!( "No rating for {} by {}", song.relative_path(), author)
+          }
+        }
+        info!("Rate {} from Music {}", song.relative_path(), song.rating);
+        rate_song(&mut id3, "itunes");
+      }
+    }
   }
 }
 
