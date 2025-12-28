@@ -1,11 +1,8 @@
 use clap::Parser;
-use itlrbs::{rate_music, tag_music, Music};
+use itlrbs::{rate_music, setup_logger, tag_music, Music};
 use rbsqlx::Database;
 use std::path::PathBuf;
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -26,19 +23,7 @@ struct Cli {
 async fn main() {
   let cli = Cli::parse();
 
-  let filter = EnvFilter::try_from_default_env()
-    .unwrap_or_else(|_| {
-      let directives = format!("{},id3rs=info,sqlx=info", if cli.verbose { "debug" } else { "info" });
-      EnvFilter::new(directives)
-    });
-  let file_appender = tracing_appender::rolling::daily("logs", "itlrbs.log");
-  let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-  tracing_subscriber::registry()
-    .with(filter)
-    .with(fmt::layer())
-    .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-    .init();
+  let _guard = setup_logger(cli.verbose);
 
   let url = cli.database.to_str().expect("invalid database path");
   let database = &mut Database::connect(url).await.unwrap();
