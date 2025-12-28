@@ -14,10 +14,10 @@ objc2-foundation = "0.3.2"
 objc2-itunes-library = "0.3.2"
 
 anyhow = "1.0.100"
-regex = "1.12.2"
+clap = { version = "4.5.53", features = ["derive"] }
 chrono = "0.4.42"
+regex = "1.12.2"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.43"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-clap = { version = "4.5.53", features = ["derive"] }
 tracing-appender = "0.2.4"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
