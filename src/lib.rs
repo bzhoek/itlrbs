@@ -1,11 +1,12 @@
 use chrono::{Datelike, Local};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
-use objc2_foundation::NSString;
+use objc2_foundation::{NSArray, NSString};
 use objc2_itunes_library::{ITLibMediaItem, ITLibPlaylist, ITLibrary};
 use rbsqlx::Database;
 use regex::{Captures, Regex};
 use std::fs;
+use std::option::IntoIter;
 use tracing::{debug, error, info, warn};
 
 pub struct Music {
@@ -27,58 +28,52 @@ impl Music {
     unsafe { self.itl.applicationVersion().to_string() }
   }
 
-  pub fn playlist_items(&self, name: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let name = NSString::from_str(name);
-    let items: Vec<_> = unsafe {
-      self.itl.allPlaylists().iter()
-        .find(|pl| pl.name().isEqualToString(&name))
-        .map(|pl| pl.items()).iter().flatten().collect()
-    };
-    items
-  }
-
-  fn playlist_by_name(&self, name: &str) -> Option<Retained<ITLibPlaylist>> {
-    let name = NSString::from_str(name);
-    let playlist = unsafe {
-      self.itl.allPlaylists().iter()
-        .find(|pl| pl.name().isEqualToString(&name))
-    };
-    playlist
-  }
-  
-  pub fn playlist_items_by_title(&self, name: &str, title: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let name = NSString::from_str(name);
-    let title = NSString::from_str(&*title);
-    let items: Vec<_> = unsafe {
-      self.itl.allPlaylists().iter()
-        .find(|pl| pl.name().isEqualToString(&name))
-        .map(|pl| pl.items())
-        .into_iter().flatten()
-        .filter(|it| it.title().isEqualToString(&title))
-        .collect::<Vec<_>>()
-    };
-    items
-  }
-
   pub fn all_items(&self) -> Vec<Retained<ITLibMediaItem>> {
     let items: Vec<_> = unsafe { self.itl.allMediaItems().iter().filter(|item| !item.isRatingComputed()).collect() };
     items
   }
 
   pub fn all_items_by_title(&self, title: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let title = NSString::from_str(&*title);
-    let items = unsafe { self.itl.allMediaItems() }.iter()
-      .filter(|item| unsafe { item.title().isEqualToString(&*title) })
-      .collect::<Vec<_>>();
-    items
+    let title = NSString::from_str(title);
+    unsafe { self.itl.allMediaItems() }.iter()
+      .filter(|item| unsafe { item.title().isEqualToString(&title) })
+      .collect::<Vec<_>>()
+  }
+
+  pub fn playlist_items(&self, name: &str) -> Vec<Retained<ITLibMediaItem>> {
+    self.playlist_items_iter(name).flatten().collect()
+  }
+
+  pub fn playlist_items_by_title(&self, name: &str, title: &str) -> Vec<Retained<ITLibMediaItem>> {
+    let title = NSString::from_str(title);
+    unsafe {
+      self.playlist_items_iter(name).flatten()
+        .filter(|it| it.title().isEqualToString(&title))
+        .collect::<Vec<_>>()
+    }
   }
 
   pub fn all_songs(&self) -> Vec<Song> {
-    self.all_items().iter().flat_map(|item| item.try_into()).collect()
+    Music::try_songs(&self.all_items())
   }
 
-  pub fn as_songs(items: &Vec<Retained<ITLibMediaItem>>) -> Vec<Song> {
+  pub fn try_songs(items: &[Retained<ITLibMediaItem>]) -> Vec<Song> {
     items.iter().flat_map(|item| item.try_into()).collect()
+  }
+
+  fn playlist_items_iter(&self, name: &str) -> IntoIter<Retained<NSArray<ITLibMediaItem>>> {
+    unsafe {
+      self.playlist_by_name(name)
+        .map(|pl| pl.items()).into_iter()
+    }
+  }
+
+  fn playlist_by_name(&self, name: &str) -> Option<Retained<ITLibPlaylist>> {
+    let name = NSString::from_str(name);
+    unsafe {
+      self.itl.allPlaylists().iter()
+        .find(|pl| pl.name().isEqualToString(&name))
+    }
   }
 }
 
@@ -141,9 +136,7 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool) {
   }
 }
 
-pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: &[&'static str], dry_run: bool) {
-  let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-
+pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[&'static str], dry_run: bool) {
   let handles = songs
     .into_iter()
     .map(|song| {

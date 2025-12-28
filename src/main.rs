@@ -2,7 +2,6 @@ use clap::Parser;
 use itlrbs::{rate_music, tag_music, Music};
 use rbsqlx::Database;
 use std::path::PathBuf;
-use objc2_foundation::NSString;
 use tracing::info;
 
 #[derive(Parser)]
@@ -32,14 +31,12 @@ async fn main() {
 
   let music = Music::default();
   let items = match &cli.title {
-    Some(title) => {
-      let items = music.all_items_by_title(&*title);
-      Music::as_songs(&items)
-    }
-    None => music.all_songs()
+    Some(title) => music.all_items_by_title(title),
+    None => music.all_items()
   };
   info!("Version {} for {} songs", music.version(), items.len());
-  rate_music(items, database, cli.dry_run).await;
+  let songs = Music::try_songs(&items);
+  rate_music(songs, database, cli.dry_run).await;
 
   let sets = vec![
     vec!["eatmos", "ebup", "edrive", "epeak", "ebang", "ebdown"],
@@ -52,7 +49,8 @@ async fn main() {
         None => music.playlist_items(list)
       };
       info!("Tagging {} songs with '{}'", items.len(), list);
-      tag_music(items, database, list, &set, cli.dry_run).await;
+      let songs = Music::try_songs(&items);
+      tag_music(songs, database, list, &set, cli.dry_run).await;
     }
   }
 
