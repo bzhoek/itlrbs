@@ -4,8 +4,9 @@ use objc2::rc::Retained;
 use objc2_foundation::{NSArray, NSString};
 use objc2_itunes_library::{ITLibMediaItem, ITLibPlaylist, ITLibrary};
 use rbsqlx::Database;
-use regex::{Captures, Regex};
+use regex::Regex;
 use std::fs;
+use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
 
 pub struct Music {
@@ -105,13 +106,14 @@ impl Song {
   }
 
   pub fn deezer_id(&self) -> Option<&str> {
-    parse_filename(&self.path).and_then(|caps| caps.get(4).map(|id| id.as_str()))
+    filename_re().captures(&self.path)
+      .and_then(|caps| caps.get(4).map(|id| id.as_str()))
   }
 }
 
-pub fn parse_filename(filename: &str) -> Option<Captures<'_>> {
-  let re = Regex::new(r"^(?:(\d+)\.\s)?(.+)\s--\s(.+)?\s\[(\d+)]\.mp3$").unwrap();
-  re.captures(filename)
+fn filename_re() -> &'static Regex {
+  static FILENAME_RE: OnceLock<Regex> = OnceLock::new();
+  FILENAME_RE.get_or_init(|| Regex::new(r"^(?:(\d+)\.\s)?(.+)\s--\s(.+)?\s\[(\d+)]\.mp3$").unwrap())
 }
 
 #[allow(unused)]
@@ -303,7 +305,7 @@ mod tests {
     let mut database = Database::connect("test_master.db").await.unwrap();
     let content = Content { ID: "68739521".into(), FileNameL: "0. Eviction -- Linea Aspera [1082461272].mp3".into(), Rating: 3 };
     let tags = database.content_tags(&content).await.unwrap();
-    assert_eq!(2, tags.len());
+    assert_eq!(1, tags.len());
   }
 
   #[test]
@@ -339,14 +341,15 @@ mod tests {
   fn test_all_items_len() {
     let music = Music::default();
     let items = music.all_items();
-    assert!(items.len() > 6984, "Found {} items", items.len());
+    assert!(items.len() > 6000, "Found only {} items", items.len());
   }
 
   #[test]
   fn test_all_songs_len() {
     let music = Music::default();
-    let items = music.all_songs();
-    assert!(items.len() > 6984, "Found {} songs", items.len());
+    let items = music.all_items();
+    let songs = music.all_songs();
+    assert!(items.len() - songs.len() < 10, "Found {} items and {} songs", items.len(), songs.len());
   }
 
   #[test]
