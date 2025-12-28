@@ -152,6 +152,10 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
 }
 
 async fn process_song(song: Song, mut database: Database) {
+  if song.rating == 0 {
+    return;
+  }
+
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), _) if exists && song.rating == 1 => {
       warn!("Delete {} with {} star rating", song.relative_path(), song.rating);
