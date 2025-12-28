@@ -35,7 +35,7 @@ async fn main() {
     None => music.all_items()
   };
   info!("Version {} for {} songs", music.version(), items.len());
-  let songs = Music::try_songs(&items);
+  let songs = Music::map_songs(&items);
   rate_music(songs, database, cli.dry_run).await;
 
   let sets = vec![
@@ -49,7 +49,7 @@ async fn main() {
         None => music.playlist_items(list)
       };
       info!("Tagging {} songs with '{}'", items.len(), list);
-      let songs = Music::try_songs(&items);
+      let songs = Music::map_songs(&items);
       tag_music(songs, database, list, &set, cli.dry_run).await;
     }
   }

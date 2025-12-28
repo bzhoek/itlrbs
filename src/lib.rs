@@ -54,10 +54,10 @@ impl Music {
   }
 
   pub fn all_songs(&self) -> Vec<Song> {
-    Music::try_songs(&self.all_items())
+    Music::map_songs(&self.all_items())
   }
 
-  pub fn try_songs(items: &[Retained<ITLibMediaItem>]) -> Vec<Song> {
+  pub fn map_songs(items: &[Retained<ITLibMediaItem>]) -> Vec<Song> {
     items.iter().flat_map(|item| item.try_into()).collect()
   }
 
