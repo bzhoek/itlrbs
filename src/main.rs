@@ -1,7 +1,7 @@
 mod cli;
-use crate::cli::Command;
-use clap::{Parser};
-use itlrbs::{rate_music, setup_logger, tag_music, Music};
+use crate::cli::{Command};
+use clap::Parser;
+use itlrbs::{rate_music, tag_music, Music};
 use rbsqlx::Database;
 use tracing::{error, info};
 
@@ -9,8 +9,7 @@ use tracing::{error, info};
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
   let cli = cli::Cli::parse();
-
-  let _guard = setup_logger(cli.verbose);
+  let _guard = cli::setup_logger(cli.verbose);
 
   let url = cli.database.to_str().expect("invalid database path");
   let database = &mut Database::connect(url).await.unwrap();

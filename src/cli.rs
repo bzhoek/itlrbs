@@ -1,5 +1,9 @@
 use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -30,4 +34,23 @@ pub(crate) enum Command {
     /// rating to set
     rating: u8,
   },
+}
+
+#[allow(unused)]
+pub(crate) fn setup_logger(verbose: bool) -> WorkerGuard {
+  let filter = EnvFilter::try_from_default_env()
+    .unwrap_or_else(|_| {
+      let directives = format!("{},id3rs=info,sqlx=info", if verbose { "debug" } else { "info" });
+      EnvFilter::new(directives)
+    });
+  let file_appender = tracing_appender::rolling::daily("logs", "itlrbs.log");
+  let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+  tracing_subscriber::registry()
+    .with(filter)
+    .with(tracing_subscriber::fmt::layer())
+    .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
+    .init();
+
+  guard
 }

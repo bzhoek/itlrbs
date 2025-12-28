@@ -10,10 +10,6 @@ use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
 use tracing::{debug, error, info, trace, warn};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -134,24 +130,6 @@ impl Song {
 fn filename_re() -> &'static Regex {
   static FILENAME_RE: OnceLock<Regex> = OnceLock::new();
   FILENAME_RE.get_or_init(|| Regex::new(r"^(?:(\d+)\.\s)?(.+)\s--\s(.+)?\s\[(\d+)]\.mp3$").unwrap())
-}
-
-pub fn setup_logger(verbose: bool) -> WorkerGuard {
-  let filter = EnvFilter::try_from_default_env()
-    .unwrap_or_else(|_| {
-      let directives = format!("{},id3rs=info,sqlx=info", if verbose { "debug" } else { "info" });
-      EnvFilter::new(directives)
-    });
-  let file_appender = tracing_appender::rolling::daily("logs", "itlrbs.log");
-  let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-  tracing_subscriber::registry()
-    .with(filter)
-    .with(tracing_subscriber::fmt::layer())
-    .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
-    .init();
-
-  guard
 }
 
 #[allow(unused)]
