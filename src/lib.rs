@@ -148,9 +148,9 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
           info!("Tagged {} with {} usn {}", song.relative_path(), tag, usn);
         }
       }
-      Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
+      Err(_) => warn!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
     },
-    (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
+    (Some(exists), _) if !exists => error!("File does not exist {}", song.path),
     _ => {}
   }
 }
@@ -188,11 +188,11 @@ async fn process_song(song: Song, mut database: Database, dry_run: bool) {
             );
           }
         }
-        Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
+        Err(_) => warn!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
       }
       update_id3(&song, dry_run).await;
     }
-    (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
+    (_, None) => warn!("No Deezer ID {}", song.path),
     _ => error!("Does not exist {}", song.path),
   }
 

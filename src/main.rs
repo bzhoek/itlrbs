@@ -45,7 +45,7 @@ async fn main() {
   for set in sets {
     for list in set.iter() {
       let items = music.playlist_items(list);
-      info!("{:>6}: {} songs", list, items.len());
+      info!("Tagging {} songs with '{}'", items.len(), list);
       tag_music(items, database, list, &set, cli.dry_run).await;
     }
   }
