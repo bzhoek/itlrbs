@@ -129,12 +129,14 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
       Ok(content) => {
-        let tags = database.content_tags(&content).await.unwrap_or_default();
+        let tags = database.content_tags(&content).await.unwrap();
         let names = tags.iter()
           .map(|t| t.Name.as_str())
+          .collect::<Vec<_>>();
+        let removes = names.clone().into_iter()
           .filter(|name| name != &tag && set.contains(name))
           .collect::<Vec<_>>();
-        for name in names {
+        for name in removes {
           if dry_run {
             info!("Would remove tag {} from {}", name, song.relative_path());
           } else {
@@ -142,7 +144,8 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
             database.untag_content(&content, name).await.unwrap();
           }
         }
-        if dry_run {
+
+        if dry_run && !names.contains(&&*tag) {
           info!("Would tag {} with {}", song.relative_path(), tag);
         } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
           info!("Tagged {} with {} usn {}", song.relative_path(), tag, usn);
@@ -237,7 +240,7 @@ mod tests {
   use super::*;
   use chrono::{Datelike, NaiveDate};
   use id3rs::ID3rs;
-  use rbsqlx::Database;
+  use rbsqlx::{Content, Database};
   use std::fs;
 
   #[test]
@@ -262,6 +265,14 @@ mod tests {
     let database = &Database::connect("test_master.db").await.unwrap();
     let songs = music.all_songs();
     rate_music(songs, database, true).await;
+  }
+
+  #[tokio::test]
+  async fn test_content_tags() {
+    let mut database = Database::connect("test_master.db").await.unwrap();
+    let content = Content { ID: "68739521".into(), FileNameL: "0. Eviction -- Linea Aspera [1082461272].mp3".into(), Rating: 3 };
+    let tags = database.content_tags(&content).await.unwrap();
+    assert_eq!(2, tags.len());
   }
 
   #[test]
