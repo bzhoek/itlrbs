@@ -40,6 +40,20 @@ impl Music {
     }
   }
 
+  pub fn all_items_by_filepath(&self, filepath: &str) -> Vec<Retained<ITLibMediaItem>> {
+    let filepath = NSString::from_str(filepath);
+    unsafe {
+      self.itl.allMediaItems().iter()
+        .filter(|item| {
+          item.location()
+            .and_then(|url| url.path())
+            .map(|path| path.hasSuffix(&filepath))
+            .unwrap_or(false)
+        })
+        .collect::<Vec<_>>()
+    }
+  }
+
   pub fn all_items_by_title(&self, title: &str) -> Vec<Retained<ITLibMediaItem>> {
     let title = NSString::from_str(title);
     unsafe { self.itl.allMediaItems() }.iter()
@@ -146,13 +160,13 @@ fn year_week() -> String {
   format!("{:02}{:02}", iso_week.year() % 100, week_number)
 }
 
-pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool) {
+pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, force: bool) {
   let handles = songs
     .into_iter()
     .map(|song| {
       let database = database.clone();
       tokio::spawn(async move {
-        process_song(song, database, dry_run).await;
+        rate_song(song, database, dry_run, force).await;
       })
     })
     .collect::<Vec<_>>();
@@ -213,7 +227,7 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
   }
 }
 
-async fn process_song(song: Song, mut database: Database, dry_run: bool) {
+async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: bool) {
   if song.rating == 0 {
     return;
   }
@@ -229,6 +243,14 @@ async fn process_song(song: Song, mut database: Database, dry_run: bool) {
     }
     (Some(exists), Some(dzid)) if exists => {
       match database.content(dzid).await {
+        Ok(content) if force => {
+          if dry_run {
+            info!("Would rate {} over rekordbox {} with {}", song.relative_path(), content.Rating, song.rating);
+          } else {
+            info!("Force rating {} of rekordbox {} with {}", song.relative_path(), content.Rating, song.rating);
+            database.rate_content(&content, song.rating as u8).await.unwrap();
+          }
+        }
         Ok(content) => {
           if song.rating > 0 && content.Rating == 0 {
             if dry_run {
@@ -319,7 +341,7 @@ mod tests {
     let music = Music::default();
     let database = &Database::connect("test_master.db").await.unwrap();
     let songs = music.all_songs();
-    rate_music(songs, database, true).await;
+    rate_music(songs, database, true, false).await;
   }
 
   #[tokio::test]
