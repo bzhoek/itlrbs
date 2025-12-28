@@ -1,40 +1,14 @@
-use clap::{Parser, Subcommand};
+mod cli;
+use crate::cli::Command;
+use clap::{Parser};
 use itlrbs::{rate_music, setup_logger, tag_music, Music};
 use rbsqlx::Database;
-use std::path::PathBuf;
 use tracing::{error, info};
 
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
-struct Cli {
-  /// don't make actual changes
-  #[arg(short, long)]
-  dry_run: bool,
-  /// verbose logging
-  #[arg(short, long)]
-  verbose: bool,
-  /// rekordbox master.db path
-  database: PathBuf,
-  /// song title to process
-  title: Option<String>,
-  #[command(subcommand)]
-  pub command: Option<Command>,
-}
-
-#[derive(Subcommand)]
-pub enum Command {
-  /// rate a single file directly
-  Rate {
-    /// full filename to rate
-    filename: String,
-    /// rating to set
-    rating: u8,
-  },
-}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
-  let cli = Cli::parse();
+  let cli = cli::Cli::parse();
 
   let _guard = setup_logger(cli.verbose);
 
@@ -61,9 +35,9 @@ async fn main() {
     return;
   }
 
-  let items = match &cli.title {
-    Some(title) => music.all_items_by_title(title),
-    None => music.all_items()
+  let items = match &cli.command {
+    Some(Command::Title { title }) => music.all_items_by_title(title),
+    _ => music.all_items(),
   };
   info!("Version {} for {} songs", music.version(), items.len());
   let songs = Music::map_songs(&items);
@@ -75,9 +49,9 @@ async fn main() {
   ];
   for set in sets {
     for list in set.iter() {
-      let items = match &cli.title {
-        Some(title) => music.playlist_items_by_title(list, title),
-        None => music.playlist_items(list)
+      let items = match &cli.command {
+        Some(Command::Title { title }) => music.playlist_items_by_title(list, title),
+        _ => music.playlist_items(list)
       };
       info!("Tagging {} songs with '{}'", items.len(), list);
       let songs = Music::map_songs(&items);

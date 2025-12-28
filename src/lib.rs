@@ -1,3 +1,5 @@
+pub(crate) mod cli;
+
 use chrono::{Datelike, Local};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
