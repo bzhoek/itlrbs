@@ -89,15 +89,13 @@ fn year_week() -> String {
   format!("{:02}{:02}", iso_week.year() % 100, week_number)
 }
 
-pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database) {
-  let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
-
+pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool) {
   let handles = songs
     .into_iter()
     .map(|song| {
       let database = database.clone();
       tokio::spawn(async move {
-        process_song(song, database).await;
+        process_song(song, database, dry_run).await;
       })
     })
     .collect::<Vec<_>>();
@@ -107,7 +105,7 @@ pub async fn rate_music(items: Vec<Retained<ITLibMediaItem>>, database: &Databas
   }
 }
 
-pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: &[&'static str]) {
+pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database, tag: &str, set: &[&'static str], dry_run: bool) {
   let songs: Vec<Song> = items.iter().flat_map(|item| item.try_into()).collect();
 
   let handles = songs
@@ -117,7 +115,7 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
       let database = database.clone();
       let set = set.to_owned();
       tokio::spawn(async move {
-        tag_song(song, database, tag, set).await;
+        tag_song(song, database, tag, set, dry_run).await;
       })
     })
     .collect::<Vec<_>>();
@@ -127,7 +125,7 @@ pub async fn tag_music(items: Vec<Retained<ITLibMediaItem>>, database: &Database
   }
 }
 
-async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str>) {
+async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str>, dry_run: bool) {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
       Ok(content) => {
@@ -137,10 +135,16 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
           .filter(|name| name != &tag && set.contains(name))
           .collect::<Vec<_>>();
         for name in names {
-          info!("Remove tag {} from {}", name, song.relative_path());
-          database.untag_content(&content, name).await.unwrap();
+          if dry_run {
+            info!("Would remove tag {} from {}", name, song.relative_path());
+          } else {
+            info!("Remove tag {} from {}", name, song.relative_path());
+            database.untag_content(&content, name).await.unwrap();
+          }
         }
-        if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
+        if dry_run {
+          info!("Would tag {} with {}", song.relative_path(), tag);
+        } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
           info!("Tagged {} with {} usn {}", song.relative_path(), tag, usn);
         }
       }
@@ -151,22 +155,30 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
   }
 }
 
-async fn process_song(song: Song, mut database: Database) {
+async fn process_song(song: Song, mut database: Database, dry_run: bool) {
   if song.rating == 0 {
     return;
   }
 
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), _) if exists && song.rating == 1 => {
-      warn!("Delete {} with {} star rating", song.relative_path(), song.rating);
-      fs::remove_file(&song.path).unwrap();
+      if dry_run {
+        info!("Would delete {} with {} star rating", song.relative_path(), song.rating);
+      } else {
+        warn!("Delete {} with {} star rating", song.relative_path(), song.rating);
+        fs::remove_file(&song.path).unwrap();
+      }
     }
     (Some(exists), Some(dzid)) if exists => {
       match database.content(dzid).await {
         Ok(content) => {
           if song.rating > 0 && content.Rating == 0 {
-            info!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
-            database.rate_content(&content, song.rating as u8).await.unwrap();
+            if dry_run {
+              info!("Would rate {} in rekordbox as {}", song.relative_path(), song.rating);
+            } else {
+              info!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+              database.rate_content(&content, song.rating as u8).await.unwrap();
+            }
           } else if song.rating > 0 && song.rating != content.Rating as usize {
             warn!(
               "Different rating for {} in Music {} and rekordbox {}",
@@ -178,18 +190,19 @@ async fn process_song(song: Song, mut database: Database) {
         }
         Err(_) => error!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
       }
-      update_id3(&song).await;
+      update_id3(&song, dry_run).await;
     }
     (Some(exists), _) if !exists => error!("Does not exist {}", song.path),
     _ => error!("Does not exist {}", song.path),
   }
 
-  async fn update_id3(song: &Song) {
+  async fn update_id3(song: &Song, dry_run: bool) {
     let rate_song = |id3: &mut ID3rs, author| {
       id3.set_popularity(author, song.rating as u8);
       if id3.grouping().is_none() {
         id3.set_grouping(&year_week());
       }
+      if dry_run { return; }
       id3.write().unwrap_or_else(|_| error!("Failed to write {}", song.relative_path()));
     };
 
@@ -222,7 +235,7 @@ async fn process_song(song: Song, mut database: Database) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chrono::{Datelike, Local};
+  use chrono::{Datelike, NaiveDate};
   use id3rs::ID3rs;
   use rbsqlx::Database;
   use std::fs;
@@ -243,11 +256,12 @@ mod tests {
   }
 
   #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-  async fn test_sqlcipher() {
+  async fn test_rating_songs() {
+    tracing_subscriber::fmt::init();
     let music = Music::default();
-    let items = music.all_items();
     let database = &Database::connect("test_master.db").await.unwrap();
-    rate_music(items, database).await;
+    let songs = music.all_songs();
+    rate_music(songs, database, true).await;
   }
 
   #[test]
