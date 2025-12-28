@@ -132,14 +132,6 @@ fn filename_re() -> &'static Regex {
   FILENAME_RE.get_or_init(|| Regex::new(r"^(?:(\d+)\.\s)?(.+)\s--\s(.+)?\s\[(\d+)]\.mp3$").unwrap())
 }
 
-#[allow(unused)]
-fn year_week() -> String {
-  let today = Local::now().date_naive();
-  let iso_week = today.iso_week();
-  let week_number = iso_week.week();
-  format!("{:02}{:02}", iso_week.year() % 100, week_number)
-}
-
 pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, force: bool) {
   let handles = songs
     .into_iter()
@@ -291,6 +283,13 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
       }
     }
   }
+}
+
+fn year_week() -> String {
+  let today = Local::now().date_naive();
+  let iso_week = today.iso_week();
+  let week_number = iso_week.week();
+  format!("{:02}{:02}", iso_week.year() % 100, week_number)
 }
 
 #[cfg(test)]
