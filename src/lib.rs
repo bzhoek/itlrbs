@@ -7,7 +7,7 @@ use rbsqlx::Database;
 use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 pub struct Music {
   itl: Retained<ITLibrary>,
@@ -258,7 +258,7 @@ async fn process_song(song: Song, mut database: Database, dry_run: bool) {
               return;
             }
             Some((_, _)) => return,
-            _ => debug!( "No rating for {} by {}", song.relative_path(), author)
+            _ => trace!( "No rating for {} by {}", song.relative_path(), author)
           }
         }
         info!("Rate {} from Music {}", song.relative_path(), song.rating);
