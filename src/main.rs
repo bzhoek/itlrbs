@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let items = music.all_items_by_filepath(filepath);
     let item = Music::one_item(items)?;
 
-    info!("Tagging filepath '{}' with rating {}", filepath, rating);
+    info!(r#"Tagging filepath "{}" with rating {}"#, filepath, rating);
     let songs = Music::map_songs(&[item]);
     rate_music(songs, database, cli.dry_run, true).await;
     database.checkpoint().await?;

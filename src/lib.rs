@@ -201,20 +201,20 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
           .collect::<Vec<_>>();
         for name in removes {
           if dry_run {
-            info!("Would remove tag {} from {}", name, song.relative_path());
+            info!(r#"Would remove tag {} from "{}""#, name, song.relative_path());
           } else {
-            info!("Remove tag {} from {}", name, song.relative_path());
+            info!(r#"Remove tag {} from "{}""#, name, song.relative_path());
             database.untag_content(&content, name).await.unwrap();
           }
         }
 
         if dry_run && !names.contains(&&*tag) {
-          info!("Would tag {} with {}", song.relative_path(), tag);
+          info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
         } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
-          info!("Tagged {} with {} usn {}", song.relative_path(), tag, usn);
+          info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
         }
       }
-      Err(_) => warn!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
+      Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
     },
     (Some(exists), _) if !exists => error!("File does not exist {}", song.path),
     _ => {}
@@ -229,9 +229,9 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), _) if exists && song.rating == 1 => {
       if dry_run {
-        info!("Would delete {} with {} star rating", song.relative_path(), song.rating);
+        info!(r#"Would delete "{}" with {} star rating"#, song.relative_path(), song.rating);
       } else {
-        warn!("Delete {} with {} star rating", song.relative_path(), song.rating);
+        warn!(r#"Delete "{}" with {} star rating"#, song.relative_path(), song.rating);
         fs::remove_file(&song.path).unwrap();
       }
     }
@@ -239,30 +239,30 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
       match database.content(dzid).await {
         Ok(content) if force => {
           if dry_run {
-            info!("Would rate {} over rekordbox {} with {}", song.relative_path(), content.Rating, song.rating);
+            info!(r#"Would rate "{}" over rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
           } else {
-            info!("Force rating {} of rekordbox {} with {}", song.relative_path(), content.Rating, song.rating);
+            info!(r#"Force rating "{}" of rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
             database.rate_content(&content, song.rating as u8).await.unwrap();
           }
         }
         Ok(content) => {
           if song.rating > 0 && content.Rating == 0 {
             if dry_run {
-              info!("Would rate {} in rekordbox as {}", song.relative_path(), song.rating);
+              info!(r#"Would rate "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
             } else {
-              info!("Rating {} in rekordbox as {}", song.relative_path(), song.rating);
+              info!(r#"Rating "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
               database.rate_content(&content, song.rating as u8).await.unwrap();
             }
           } else if song.rating > 0 && song.rating != content.Rating as usize {
             warn!(
-              "Clash on {} with Music {} and rekordbox {} rating",
+              r#"Clash on "{}" with Music {} and rekordbox {} rating"#,
               song.relative_path(),
               song.rating,
               content.Rating
             );
           }
         }
-        Err(_) => warn!("Not in rekordbox {} with {:?}", song.relative_path(), dzid),
+        Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
       }
       update_id3(&song, dry_run, force).await;
     }
@@ -278,7 +278,7 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
         id3.set_grouping(&year_week());
       }
       if dry_run { return; }
-      id3.write().unwrap_or_else(|_| error!("Failed to write {}", song.relative_path()));
+      id3.write().unwrap_or_else(|_| error!(r#"Failed to write "{}""#, song.relative_path()));
     };
 
     match ID3rs::read(&song.path) {
@@ -288,7 +288,7 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
           match id3.popularity(author) {
             Some((_, rating)) if rating != song.rating as u8 || force => {
               info!(
-                "Update {} from Music {} over ID3 {} by {}",
+                r#"Update "{}" with Music {} over ID3 {} as '{}'"#,
                 song.relative_path(),
                 song.rating,
                 rating,
@@ -297,10 +297,10 @@ async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: boo
               return;
             }
             Some((_, _)) => return,
-            _ => trace!( "No rating for {} by {}", song.relative_path(), author)
+            _ => trace!(r#"No rating for "{}" by {}"#, song.relative_path(), author)
           }
         }
-        info!("Rate {} from Music {}", song.relative_path(), song.rating);
+        info!(r#"Rate "{}" from Music {}"#, song.relative_path(), song.rating);
         rate_song(&mut id3, "itunes");
       }
     }
