@@ -2,6 +2,7 @@ use clap::Parser;
 use itlrbs::{rate_music, tag_music, Music};
 use rbsqlx::Database;
 use std::path::PathBuf;
+use objc2_foundation::NSString;
 use tracing::info;
 
 #[derive(Parser)]
@@ -10,8 +11,10 @@ struct Cli {
   /// don't make actual changes
   #[arg(short, long)]
   dry_run: bool,
-  /// rekordbox master.db file
+  /// rekordbox master.db path
   database: PathBuf,
+  /// song title to process
+  title: Option<String>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -28,14 +31,14 @@ async fn main() {
   }
 
   let music = Music::default();
-  // TODO: make this an optional cli parameter
-  // let name = NSString::from_str("1a E Vangelis Dreams (Baime Remix)");
-  // let items = music.all_items().into_iter()
-  //   .filter(|item| unsafe { item.title().isEqualToString(&*name) })
-  //   .collect::<Vec<_>>();
-  // let items = items.iter().flat_map(|item| item.try_into()).collect::<Vec<Song>>();
-  let items = music.all_songs();
-  info!("Version {} has {} songs", music.version(), items.len());
+  let items = match cli.title {
+    Some(title) => {
+      let items = music.all_items_by_title(&*title);
+      Music::as_songs(&items)
+    }
+    None => music.all_songs()
+  };
+  info!("Version {} for {} songs", music.version(), items.len());
   rate_music(items, database, cli.dry_run).await;
 
   let sets = vec![

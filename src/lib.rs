@@ -31,7 +31,20 @@ impl Music {
     let playlists = unsafe { self.itl.allPlaylists() };
     let name = NSString::from_str(name);
     let items: Vec<_> = unsafe {
-      playlists.iter().find(|pl| pl.name().isEqualToString(&name)).map(|pl| pl.items()).iter().flatten().collect()
+      playlists.iter().find(|pl| pl.name().isEqualToString(&name))
+        .map(|pl| pl.items()).iter().flatten().collect()
+    };
+    items
+  }
+
+  pub fn playlist_items_by_title(&self, name: &str, title: &str) -> Vec<Retained<ITLibMediaItem>> {
+    let playlists = unsafe { self.itl.allPlaylists() };
+    let name = NSString::from_str(name);
+    let title = NSString::from_str(&*title);
+    let items: Vec<_> = unsafe {
+      playlists.iter().find(|pl| pl.name().isEqualToString(&name))
+        .map(|pl| pl.items().iter().filter(|pl| pl.title().isEqualToString(&title)).collect::<Vec<_>>())
+        .into_iter().flatten().collect()
     };
     items
   }
@@ -41,8 +54,20 @@ impl Music {
     items
   }
 
+  pub fn all_items_by_title(&self, title: &str) -> Vec<Retained<ITLibMediaItem>> {
+    let title = NSString::from_str(&*title);
+    let items = unsafe { self.itl.allMediaItems() }.iter()
+      .filter(|item| unsafe { item.title().isEqualToString(&*title) })
+      .collect::<Vec<_>>();
+    items
+  }
+
   pub fn all_songs(&self) -> Vec<Song> {
     self.all_items().iter().flat_map(|item| item.try_into()).collect()
+  }
+
+  pub fn as_songs(items: &Vec<Retained<ITLibMediaItem>>) -> Vec<Song> {
+    items.iter().flat_map(|item| item.try_into()).collect()
   }
 }
 
