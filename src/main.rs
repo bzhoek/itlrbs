@@ -1,13 +1,11 @@
 mod cli;
-use crate::cli::Command;
-use clap::Parser;
 use itlrbs::{rate_music, tag_music, Music};
 use rbsqlx::Database;
 use tracing::info;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let cli = cli::Cli::parse();
+  let cli = cli::parse_cli();
   let _guard = cli::setup_logger(cli.verbose);
 
   let url = cli.database.to_str().expect("invalid database path");
@@ -18,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
 
   let music = Music::default();
-  if let Some(Command::Rate { filename: filepath, rating }) = &cli.command {
+  if let Some(cli::Command::Rate { filename: filepath, rating }) = &cli.command {
     let items = music.all_items_by_filepath(filepath);
     let item = Music::one_item(items)?;
 
@@ -31,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // use the same item for rating and tagging if specified
   let one = match &cli.command {
-    Some(Command::Title { title }) => {
+    Some(cli::Command::Title { title }) => {
       let items = music.all_items_by_title(title);
       Music::one_item(items)?.into()
     },

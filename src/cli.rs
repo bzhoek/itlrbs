@@ -5,6 +5,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+pub fn parse_cli() -> Cli {
+  Cli::parse()
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 pub(crate) struct Cli {
@@ -36,8 +40,7 @@ pub(crate) enum Command {
   },
 }
 
-#[allow(unused)]
-pub(crate) fn setup_logger(verbose: bool) -> WorkerGuard {
+pub fn setup_logger(verbose: bool) -> WorkerGuard {
   let filter = EnvFilter::try_from_default_env()
     .unwrap_or_else(|_| {
       let directives = format!("{},id3rs=info,sqlx=info", if verbose { "debug" } else { "info" });
