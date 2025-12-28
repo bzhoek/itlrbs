@@ -217,7 +217,7 @@ async fn process_song(song: Song, mut database: Database, dry_run: bool) {
             }
           } else if song.rating > 0 && song.rating != content.Rating as usize {
             warn!(
-              "Different rating for {} in Music {} and rekordbox {}",
+              "Clash on {} with Music {} and rekordbox {} rating",
               song.relative_path(),
               song.rating,
               content.Rating
@@ -228,7 +228,7 @@ async fn process_song(song: Song, mut database: Database, dry_run: bool) {
       }
       update_id3(&song, dry_run).await;
     }
-    (_, None) => warn!("No Deezer ID {}", song.path),
+    (_, None) => debug!("No Deezer ID {}", song.path),
     _ => error!("Does not exist {}", song.path),
   }
 
