@@ -6,7 +6,6 @@ use objc2_itunes_library::{ITLibMediaItem, ITLibPlaylist, ITLibrary};
 use rbsqlx::Database;
 use regex::{Captures, Regex};
 use std::fs;
-use std::option::IntoIter;
 use tracing::{debug, error, info, warn};
 
 pub struct Music {
@@ -29,8 +28,11 @@ impl Music {
   }
 
   pub fn all_items(&self) -> Vec<Retained<ITLibMediaItem>> {
-    let items: Vec<_> = unsafe { self.itl.allMediaItems().iter().filter(|item| !item.isRatingComputed()).collect() };
-    items
+    unsafe {
+      self.itl.allMediaItems().iter()
+        .filter(|item| !item.isRatingComputed())
+        .collect()
+    }
   }
 
   pub fn all_items_by_title(&self, title: &str) -> Vec<Retained<ITLibMediaItem>> {
@@ -61,7 +63,7 @@ impl Music {
     items.iter().flat_map(|item| item.try_into()).collect()
   }
 
-  fn playlist_items_iter(&self, name: &str) -> IntoIter<Retained<NSArray<ITLibMediaItem>>> {
+  fn playlist_items_iter(&self, name: &str) -> impl Iterator<Item=Retained<NSArray<ITLibMediaItem>>> {
     unsafe {
       self.playlist_by_name(name)
         .map(|pl| pl.items()).into_iter()
