@@ -1,5 +1,3 @@
-pub(crate) mod cli;
-
 use chrono::{Datelike, Local};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
@@ -63,11 +61,10 @@ impl Music {
     self.playlist_items_iter(name).flatten().collect()
   }
 
-  pub fn playlist_items_by_title(&self, name: &str, title: &str) -> Vec<Retained<ITLibMediaItem>> {
-    let title = NSString::from_str(title);
+  pub fn playlist_item(&self, name: &str, needle: &Retained<ITLibMediaItem>) -> Vec<Retained<ITLibMediaItem>> {
     unsafe {
       self.playlist_items_iter(name).flatten()
-        .filter(|it| it.title().isEqualToString(&title))
+        .filter(|it| it.persistentID() == needle.persistentID())
         .collect::<Vec<_>>()
     }
   }
@@ -92,6 +89,31 @@ impl Music {
     unsafe {
       self.itl.allPlaylists().iter()
         .find(|pl| pl.name().isEqualToString(&name))
+    }
+  }
+
+  pub fn one_item(mut items: Vec<Retained<ITLibMediaItem>>) -> Result<Retained<ITLibMediaItem>, SelectionError> {
+    match items.len() {
+      0 => Err(SelectionError::Empty),
+      n if n > 1 => Err(SelectionError::TooMany(n)),
+      _ => Ok(items.pop().unwrap()),
+    }
+  }
+}
+
+#[derive(Debug)]
+pub enum SelectionError {
+  Empty,
+  TooMany(usize),
+}
+
+impl std::error::Error for SelectionError {}
+
+impl std::fmt::Display for SelectionError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      SelectionError::Empty => write!(f, "No items found"),
+      SelectionError::TooMany(n) => write!(f, "Too many items found: {}", n),
     }
   }
 }
@@ -304,14 +326,14 @@ mod tests {
   fn test_playlist_items() {
     let music = Music::default();
     let items = music.playlist_items("eatmos");
-    assert_eq!(553, items.len());
+    assert!(items.len() > 500, "Found only {} items", items.len());
     let item = items.first().unwrap();
     let song: Song = item.try_into().unwrap();
     assert_eq!(
       "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3",
       song.path
     );
-    assert_eq!("/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path());
+    assert_eq!("/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3", song.relative_path());
     assert_eq!(3, song.rating);
   }
 

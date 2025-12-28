@@ -1,43 +1,48 @@
 mod cli;
-use crate::cli::{Command};
+use crate::cli::Command;
 use clap::Parser;
 use itlrbs::{rate_music, tag_music, Music};
 use rbsqlx::Database;
-use tracing::{error, info};
-
+use tracing::info;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let cli = cli::Cli::parse();
   let _guard = cli::setup_logger(cli.verbose);
 
   let url = cli.database.to_str().expect("invalid database path");
-  let database = &mut Database::connect(url).await.unwrap();
+  let database = &mut Database::connect(url).await?;
   info!("Database connected: {}", url);
   if cli.dry_run {
     info!("Dry run mode, not making actual changes");
   }
 
   let music = Music::default();
-  if let Some(Command::Rate { filename, rating }) = &cli.command {
-    let items = music.all_items_by_filepath(filename);
-    match items.len() {
-      0 => info!("No songs found for filename '{}'", filename),
-      1 => {
-        info!("Tagging {} song with rating {}", items.len(), rating);
-        let songs = Music::map_songs(&items);
-        rate_music(songs, database, cli.dry_run, true).await;
-        database.checkpoint().await.unwrap();
-      }
-      _ => error!("Not unique filename '{}', {:?}", filename, items),
-    }
-    return;
+  if let Some(Command::Rate { filename: filepath, rating }) = &cli.command {
+    let items = music.all_items_by_filepath(filepath);
+    let item = Music::one_item(items)?;
+
+    info!("Tagging filepath '{}' with rating {}", filepath, rating);
+    let songs = Music::map_songs(&[item]);
+    rate_music(songs, database, cli.dry_run, true).await;
+    database.checkpoint().await?;
+    return Ok(());
   }
 
-  let items = match &cli.command {
-    Some(Command::Title { title }) => music.all_items_by_title(title),
+  // use the same item for rating and tagging if specified
+  let one = match &cli.command {
+    Some(Command::Title { title }) => {
+      let items = music.all_items_by_title(title);
+      Music::one_item(items)?.into()
+    },
+    _ => None,
+  };
+
+  let items = match &one {
+    Some(item) => vec![item.clone()],
     _ => music.all_items(),
   };
+
   info!("Version {} for {} songs", music.version(), items.len());
   let songs = Music::map_songs(&items);
   rate_music(songs, database, cli.dry_run, false).await;
@@ -48,9 +53,9 @@ async fn main() {
   ];
   for set in sets {
     for list in set.iter() {
-      let items = match &cli.command {
-        Some(Command::Title { title }) => music.playlist_items_by_title(list, title),
-        _ => music.playlist_items(list)
+      let items = match &one {
+        Some(item) => music.playlist_item(list, item),
+        None => music.playlist_items(list)
       };
       info!("Tagging {} songs with '{}'", items.len(), list);
       let songs = Music::map_songs(&items);
@@ -58,5 +63,6 @@ async fn main() {
     }
   }
 
-  database.checkpoint().await.unwrap();
+  database.checkpoint().await?;
+  Ok(())
 }
