@@ -1,6 +1,25 @@
 
 Update ratings from Music to rekordbox and add tags based on playlist membership.
 
+### Usage
+
+```sh
+Usage: itlrbs [OPTIONS] <DATABASE> [COMMAND]
+
+Commands:
+  title  process a single file
+  rate   rate a single file directly
+
+Arguments:
+  <DATABASE>  rekordbox master.db path
+
+Options:
+  -d, --dry-run  don't make actual changes
+  -v, --verbose  verbose logging
+  
+cargo run -- ~/Library/Pioneer/rekordbox/master.db
+```
+
 ### Tagging
 
 For each song in named playlists of Music library
