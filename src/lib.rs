@@ -188,7 +188,7 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
   }
 }
 
-async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str>, dry_run: bool) {
+async fn tag_song(song: Song, database: Database, tag: String, set: Vec<&str>, dry_run: bool) {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
       Ok(content) => {
@@ -221,7 +221,7 @@ async fn tag_song(song: Song, mut database: Database, tag: String, set: Vec<&str
   }
 }
 
-async fn rate_song(song: Song, mut database: Database, dry_run: bool, force: bool) {
+async fn rate_song(song: Song, database: Database, dry_run: bool, force: bool) {
   if song.rating == 0 {
     return;
   }
