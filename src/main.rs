@@ -26,6 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     database.checkpoint().await?;
     return Ok(());
   }
+  
   if let Some(cli::Command::Rate { filename: filepath, rating }) = &cli.command {
     let items = music.all_items_by_filepath(filepath);
     let item = Music::one_item(items)?;

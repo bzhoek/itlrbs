@@ -1,4 +1,4 @@
-use chrono::{Datelike, Local};
+use chrono::{Datelike, Local, NaiveDate, Weekday};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
 use objc2_foundation::{NSArray, NSString};
@@ -7,6 +7,7 @@ use rbsqlx::{Content, Database};
 use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
+use anyhow::anyhow;
 use tracing::{debug, error, info, trace, warn};
 
 pub struct Music {
@@ -153,6 +154,12 @@ impl Song {
     filename_re().captures(&self.path)
       .and_then(|caps| caps.get(4).map(|id| id.as_str()))
   }
+
+  pub fn date(&self) -> Option<NaiveDate> {
+    self.grouping.as_ref()
+      .and_then(|g| g.parse::<u32>().ok())
+      .and_then(|yearweek| NaiveDate::from_isoywd_opt((yearweek / 100 + 2000) as i32, yearweek % 100, Weekday::Mon))
+  }
 }
 
 fn filename_re() -> &'static Regex {
@@ -166,7 +173,10 @@ pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, f
     .map(|song| {
       let database = database.clone();
       tokio::spawn(async move {
-        group_song(song, database, dry_run, force).await;
+        match group_song(&song, database, dry_run, force).await {
+          Ok(content) => info!("Grouped song {} with ID {} successfully", song.relative_path(), content.ID),
+          Err(e) => error!("Failed to group song {} because: {}", song.relative_path(), e),
+        }
       })
     })
     .collect::<Vec<_>>();
@@ -210,49 +220,65 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
   }
 }
 
-async fn group_song(song: Song, database: Database, dry_run: bool, force: bool) {
+async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool) -> anyhow::Result<Content, anyhow::Error> {
+  if let Some(content) = content_for(song, &database).await {
+    if let Some(date) = &song.date() {
+      let recents = database.playlist_top("recent").await?;
+      let name = format!("recent-{:02}{:02}", date.year() % 100, date.month());
+      if !dry_run {
+        let week = database.playlist_create(&*name, &recents).await?;
+        database.playlist_add(&week, &content).await?;
+      } else {
+        info!("Would group {} under recent/{}", content.ID, name);
+      }
+    }
+    return Ok(content);
+  }
+  Err(anyhow!("Failed to group song"))
+}
+
+async fn content_for(song: &Song, database: &Database) -> Option<Content> {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
-      Ok(_) => {
-        info!("Found {}", dzid);
+      Ok(content) => {
+        Some(content)
       }
-      Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
+      Err(_) => {
+        warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid);
+        None
+      }
     }
-    (Some(exists), _) if !exists => error!("File does not exist {}", song.path),
-    _ => {}
+    (Some(exists), _) if !exists => {
+      error!("Not in filesystem {}", song.path);
+      None
+    }
+    _ => None
   }
 }
 
 async fn tag_song(song: Song, database: Database, tag: String, set: Vec<&str>, dry_run: bool) {
-  match (fs::exists(&song.path).ok(), song.deezer_id()) {
-    (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
-      Ok(content) => {
-        let tags = database.content_tags(&content).await.unwrap();
-        let names = tags.iter()
-          .map(|t| t.Name.as_str())
-          .collect::<Vec<_>>();
-        let removes = names.clone().into_iter()
-          .filter(|name| name != &tag && set.contains(name))
-          .collect::<Vec<_>>();
-        for name in removes {
-          if dry_run {
-            info!(r#"Would remove tag {} from "{}""#, name, song.relative_path());
-          } else {
-            info!(r#"Remove tag {} from "{}""#, name, song.relative_path());
-            database.untag_content(&content, name).await.unwrap();
-          }
-        }
-
-        if dry_run && !names.contains(&&*tag) {
-          info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
-        } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
-          info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
-        }
+  if let Some(content) = content_for(&song, &database).await {
+    let tags = database.content_tags(&content).await.unwrap();
+    let names = tags.iter()
+      .map(|t| t.Name.as_str())
+      .collect::<Vec<_>>();
+    let removes = names.clone().into_iter()
+      .filter(|name| name != &tag && set.contains(name))
+      .collect::<Vec<_>>();
+    for name in removes {
+      if dry_run {
+        info!(r#"Would remove tag {} from "{}""#, name, song.relative_path());
+      } else {
+        info!(r#"Remove tag {} from "{}""#, name, song.relative_path());
+        database.untag_content(&content, name).await.unwrap();
       }
-      Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
-    },
-    (Some(exists), _) if !exists => error!("File does not exist {}", song.path),
-    _ => {}
+    }
+
+    if dry_run && !names.contains(&&*tag) {
+      info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
+    } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
+      info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
+    }
   }
 }
 
@@ -352,7 +378,7 @@ fn year_week() -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chrono::{Datelike, NaiveDate};
+  use chrono::{Datelike, NaiveDate, Weekday};
   use id3rs::ID3rs;
   use rbsqlx::{Content, Database};
   use std::fs;
@@ -445,5 +471,14 @@ mod tests {
     let week_number = iso_week.week();
     let year_week = format!("{:02}{:02}", iso_week.year() % 100, week_number);
     assert_eq!("2550", year_week);
+  }
+
+  #[test]
+  fn test_month_from_iso_week_number() {
+    let yearweek = "2550";
+    let yearweek = yearweek.parse::<u32>().unwrap();
+    let date = NaiveDate::from_isoywd_opt((yearweek / 100 + 2000) as i32, yearweek % 100, Weekday::Mon).unwrap();
+    assert_eq!(2025, date.year());
+    assert_eq!(12, date.month());
   }
 }
