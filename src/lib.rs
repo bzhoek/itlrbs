@@ -174,9 +174,9 @@ pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, f
       let database = database.clone();
       tokio::spawn(async move {
         match group_song(&song, database, dry_run, force).await {
-          Ok(content) => info!("Grouped song {} with ID {} successfully", song.relative_path(), content.ID),
+          Ok(_) => {},
           Err(e) => error!("Failed to group song {} because: {}", song.relative_path(), e),
-        }
+        };
       })
     })
     .collect::<Vec<_>>();
@@ -192,7 +192,11 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, fo
     .map(|song| {
       let database = database.clone();
       tokio::spawn(async move {
-        rate_song(song, database, dry_run, force).await;
+        // rate_song(&song, &database, dry_run, force).await;
+        match group_song(&song, database, dry_run, force).await {
+          Ok(_) => {},
+          Err(e) => error!("Failed to group song: {}", e),
+        };
       })
     })
     .collect::<Vec<_>>();
@@ -227,13 +231,24 @@ async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool
   let content = content_for(song, &database).await?;
   if let Some(date) = &song.date() {
     let recents = database.playlist_top("recent").await?;
-    let name = format!("recent-{:02}{:02}", date.year() % 100, date.month());
-    if !dry_run {
-      let week = database.playlist_create(&name, &recents).await?;
-      database.playlist_add(&week, &content).await?;
-      info!("Grouped {} under recent/{}", content.ID, name);
-    } else {
-      info!("Would group {} under recent/{}", content.ID, name);
+    let name = format!("period-{:02}{:02}", date.year() % 100, date.month());
+    let mut recent = database.playlist(&name, &recents).await?;
+    if recent.is_none() {
+      if dry_run {
+        info!("Would create playlist recent/{}", name);
+      } else {
+        recent = database.playlist_create(&name, &recents).await?.into();
+      }
+    }
+
+    if let Some(playlist) = recent {
+      let exists = database.playlist_content_exists(&playlist, &content).await?;
+      if !exists && dry_run {
+        info!("Would group {} under recent/{}", content.ID, name);
+      } else if !exists && !dry_run {
+        database.playlist_add(&playlist, &content).await?;
+        info!("Grouped {} under recent/{}", content.ID, name);
+      }
     }
   }
   Ok(content)
@@ -270,13 +285,13 @@ async fn tag_song(song: &Song, database: Database, tag: String, set: Vec<&str>, 
 
   if dry_run && !names.contains(&&*tag) {
     info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
-  } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
+  } else if let Some(usn) = database.tag_content(&content, &tag).await? {
     info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
   }
   Ok(content)
 }
 
-async fn rate_song(song: Song, database: Database, dry_run: bool, force: bool) {
+async fn rate_song(song: &Song, database: &Database, dry_run: bool, force: bool) {
   if song.rating == 0 {
     return;
   }
@@ -403,7 +418,7 @@ mod tests {
 
   #[tokio::test]
   async fn test_content_tags() {
-    let mut database = Database::connect("test_master.db").await.unwrap();
+    let database = Database::connect("test_master.db").await.unwrap();
     let content = Content { ID: "68739521".into(), FileNameL: "0. Eviction -- Linea Aspera [1082461272].mp3".into(), Rating: 3 };
     let tags = database.content_tags(&content).await.unwrap();
     assert_eq!(1, tags.len());
