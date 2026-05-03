@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   info!("Version {} for {} songs", music.version(), items.len());
   let songs = Music::map_songs(&items);
+  info!("Rate {} songs", songs.len());
   rate_music(songs, database, cli.dry_run, false).await;
 
   let sets = vec![
@@ -62,11 +63,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   ];
   for set in sets {
     for list in set.iter() {
+      info!("Tagging {} songs with '{}'", items.len(), list);
       let items = match &one {
         Some(item) => music.playlist_item(list, item),
         None => music.playlist_items(list)
       };
-      info!("Tagging {} songs with '{}'", items.len(), list);
       let songs = Music::map_songs(&items);
       tag_music(songs, database, list, &set, cli.dry_run).await;
     }
