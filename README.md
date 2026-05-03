@@ -7,6 +7,7 @@ Update ratings from Music to rekordbox and add tags based on playlist membership
 Usage: itlrbs [OPTIONS] <DATABASE> [COMMAND]
 
 Commands:
+  group  add single file to groups
   title  process a single file
   rate   rate a single file directly
 

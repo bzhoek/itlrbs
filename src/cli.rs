@@ -26,6 +26,11 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
+  /// add single file to groups
+  Group {
+    /// full filename
+    filename: String,
+  },
   /// process a single file
   Title {
     /// song title

@@ -1,5 +1,5 @@
 mod cli;
-use itlrbs::{rate_music, tag_music, Music};
+use itlrbs::{group_music, rate_music, tag_music, Music};
 use rbsqlx::Database;
 use tracing::info;
 
@@ -16,6 +16,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
 
   let music = Music::default();
+  if let Some(cli::Command::Group { filename: filepath }) = &cli.command {
+    let items = music.all_items_by_filepath(filepath);
+    let item = Music::one_item(items)?;
+
+    info!(r#"Grouping filepath "{}""#, filepath);
+    let songs = Music::map_songs(&[item]);
+    group_music(songs, database, cli.dry_run, true).await;
+    database.checkpoint().await?;
+    return Ok(());
+  }
   if let Some(cli::Command::Rate { filename: filepath, rating }) = &cli.command {
     let items = music.all_items_by_filepath(filepath);
     let item = Music::one_item(items)?;

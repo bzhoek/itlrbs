@@ -3,7 +3,7 @@ use id3rs::ID3rs;
 use objc2::rc::Retained;
 use objc2_foundation::{NSArray, NSString};
 use objc2_itunes_library::{ITLibMediaItem, ITLibPlaylist, ITLibrary};
-use rbsqlx::Database;
+use rbsqlx::{Content, Database};
 use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
@@ -121,6 +121,8 @@ impl std::fmt::Display for SelectionError {
 pub struct Song {
   pub path: String,
   pub rating: usize,
+  pub bpm: usize,
+  pub grouping: Option<String>
 }
 
 impl TryFrom<&Retained<ITLibMediaItem>> for Song {
@@ -128,11 +130,15 @@ impl TryFrom<&Retained<ITLibMediaItem>> for Song {
 
   fn try_from(item: &Retained<ITLibMediaItem>) -> Result<Self, Self::Error> {
     let rating = unsafe { item.rating() }.cast_unsigned() / 20;
+    let bpm = unsafe { item.beatsPerMinute() };
+    let grouping = unsafe { item.grouping() }.map(|s| s.to_string());
     let path = unsafe { item.location() }.and_then(|url| url.path()).map(|path| path.to_string()).ok_or(())?;
 
     Ok(Song {
       path,
       rating,
+      bpm,
+      grouping,
     })
   }
 }
@@ -152,6 +158,22 @@ impl Song {
 fn filename_re() -> &'static Regex {
   static FILENAME_RE: OnceLock<Regex> = OnceLock::new();
   FILENAME_RE.get_or_init(|| Regex::new(r"^(?:(\d+)\.\s)?(.+)\s--\s(.+)?\s\[(\d+)]\.mp3$").unwrap())
+}
+
+pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, force: bool) {
+  let handles = songs
+    .into_iter()
+    .map(|song| {
+      let database = database.clone();
+      tokio::spawn(async move {
+        group_song(song, database, dry_run, force).await;
+      })
+    })
+    .collect::<Vec<_>>();
+
+  for handle in handles {
+    handle.await.unwrap();
+  }
 }
 
 pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, force: bool) {
@@ -185,6 +207,19 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
 
   for handle in handles {
     handle.await.unwrap();
+  }
+}
+
+async fn group_song(song: Song, database: Database, dry_run: bool, force: bool) {
+  match (fs::exists(&song.path).ok(), song.deezer_id()) {
+    (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
+      Ok(_) => {
+        info!("Found {}", dzid);
+      }
+      Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
+    }
+    (Some(exists), _) if !exists => error!("File does not exist {}", song.path),
+    _ => {}
   }
 }
 
@@ -367,7 +402,12 @@ mod tests {
 
   #[test]
   fn test_deezer_id() {
-    let song = Song { path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(), rating: 3 };
+    let song = Song {
+      path: "/Users/bas/Library/Mobile Documents/com~apple~CloudDocs/Music/discover/DW202123/29. 2020 Souls -- Aaaron [918205852].mp3".to_string().into(),
+      rating: 3,
+      bpm: 120,
+      grouping: None,
+    };
     let id = song.deezer_id().unwrap();
     assert_eq!("918205852", id);
   }
