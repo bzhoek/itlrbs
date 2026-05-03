@@ -210,7 +210,10 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
       let database = database.clone();
       let set = set.to_owned();
       tokio::spawn(async move {
-        tag_song(song, database, tag, set, dry_run).await;
+        match tag_song(&song, database, tag, set, dry_run).await {
+          Ok(_) => {}
+          Err(e) => error!("Failed to tag: {}", e),
+        };
       })
     })
     .collect::<Vec<_>>();
@@ -221,65 +224,56 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
 }
 
 async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool) -> anyhow::Result<Content, anyhow::Error> {
-  if let Some(content) = content_for(song, &database).await {
-    if let Some(date) = &song.date() {
-      let recents = database.playlist_top("recent").await?;
-      let name = format!("recent-{:02}{:02}", date.year() % 100, date.month());
-      if !dry_run {
-        let week = database.playlist_create(&*name, &recents).await?;
-        database.playlist_add(&week, &content).await?;
-      } else {
-        info!("Would group {} under recent/{}", content.ID, name);
-      }
+  let content = content_for(song, &database).await?;
+  if let Some(date) = &song.date() {
+    let recents = database.playlist_top("recent").await?;
+    let name = format!("recent-{:02}{:02}", date.year() % 100, date.month());
+    if !dry_run {
+      let week = database.playlist_create(&name, &recents).await?;
+      database.playlist_add(&week, &content).await?;
+      info!("Grouped {} under recent/{}", content.ID, name);
+    } else {
+      info!("Would group {} under recent/{}", content.ID, name);
     }
-    return Ok(content);
   }
-  Err(anyhow!("Failed to group song"))
+  Ok(content)
 }
 
-async fn content_for(song: &Song, database: &Database) -> Option<Content> {
+async fn content_for(song: &Song, database: &Database) -> anyhow::Result<Content, anyhow::Error> {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
-    (Some(exists), Some(dzid)) if exists => match database.content(dzid).await {
-      Ok(content) => {
-        Some(content)
-      }
-      Err(_) => {
-        warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid);
-        None
-      }
-    }
-    (Some(exists), _) if !exists => {
-      error!("Not in filesystem {}", song.path);
-      None
-    }
-    _ => None
+    (Some(exists), Some(dzid)) if exists =>
+      database.content(dzid).await
+        .map_err(|_| anyhow!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid)),
+    (Some(exists), _) if !exists =>
+      Err(anyhow!(r#"Not in filesystem "{}""#, song.relative_path())),
+    _ => Err(anyhow!(r#"No Deezer ID in "{}""#, song.relative_path())),
   }
 }
 
-async fn tag_song(song: Song, database: Database, tag: String, set: Vec<&str>, dry_run: bool) {
-  if let Some(content) = content_for(&song, &database).await {
-    let tags = database.content_tags(&content).await.unwrap();
-    let names = tags.iter()
-      .map(|t| t.Name.as_str())
-      .collect::<Vec<_>>();
-    let removes = names.clone().into_iter()
-      .filter(|name| name != &tag && set.contains(name))
-      .collect::<Vec<_>>();
-    for name in removes {
-      if dry_run {
-        info!(r#"Would remove tag {} from "{}""#, name, song.relative_path());
-      } else {
-        info!(r#"Remove tag {} from "{}""#, name, song.relative_path());
-        database.untag_content(&content, name).await.unwrap();
-      }
-    }
-
-    if dry_run && !names.contains(&&*tag) {
-      info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
-    } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
-      info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
+async fn tag_song(song: &Song, database: Database, tag: String, set: Vec<&str>, dry_run: bool) -> anyhow::Result<Content, anyhow::Error> {
+  let content = content_for(song, &database).await?;
+  let tags = database.content_tags(&content).await?;
+  let names = tags.iter()
+    .map(|t| t.Name.as_str())
+    .collect::<Vec<_>>();
+  let removes = names.clone().into_iter()
+    .filter(|name| name != &tag && set.contains(name))
+    .collect::<Vec<_>>();
+  for name in removes {
+    if dry_run {
+      info!(r#"Would remove tag {} from "{}""#, name, song.relative_path());
+    } else {
+      info!(r#"Remove tag {} from "{}""#, name, song.relative_path());
+      database.untag_content(&content, name).await?;
     }
   }
+
+  if dry_run && !names.contains(&&*tag) {
+    info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
+  } else if let Some(usn) = database.tag_content(&content, &tag).await.unwrap() {
+    info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
+  }
+  Ok(content)
 }
 
 async fn rate_song(song: Song, database: Database, dry_run: bool, force: bool) {
