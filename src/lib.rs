@@ -143,7 +143,7 @@ pub struct Song {
   pub path: String,
   pub rating: usize,
   pub bpm: usize,
-  pub grouping: Option<String>
+  pub grouping: Option<String>,
 }
 
 impl TryFrom<&Retained<ITLibMediaItem>> for Song {
@@ -194,10 +194,10 @@ pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, f
       let database = database.clone();
       tokio::spawn(async move {
         match group_song(&song, database, dry_run, force).await {
-          Ok(_) => {},
+          Ok(_) => {}
           Err(e) if e.downcast_ref::<ContentError>().is_some() => {
             debug!("Failed to group song: {}", e);
-          },
+          }
           Err(e) => error!("Failed to group song {} because: {}", song.relative_path(), e),
         };
       })
@@ -363,39 +363,38 @@ async fn rate_song(song: &Song, database: &Database, dry_run: bool, force: bool)
   }
 }
 
-  async fn update_id3(song: &Song, dry_run: bool, force: bool) {
-    let rate_song = |id3: &mut ID3rs, author| {
-      id3.clear_popularities();
-      id3.set_popularity(author, song.rating as u8);
-      if id3.grouping().is_none() {
-        id3.set_grouping(&year_week());
-      }
-      if dry_run { return; }
-      id3.write().unwrap_or_else(|_| error!(r#"Failed to write "{}""#, song.relative_path()));
-    };
+async fn update_id3(song: &Song, dry_run: bool, force: bool) {
+  let rate_song = |id3: &mut ID3rs, author| {
+    id3.clear_popularities();
+    id3.set_popularity(author, song.rating as u8);
+    if id3.grouping().is_none() {
+      id3.set_grouping(&year_week());
+    }
+    if dry_run { return; }
+    id3.write().unwrap_or_else(|_| error!(r#"Failed to write "{}""#, song.relative_path()));
+  };
 
-    match ID3rs::read(&song.path) {
-      Err(_) => error!("Cannot read ID3 for {}", song.path),
-      Ok(mut id3) => {
-        for author in ["itunes", "traktor@native-instruments.de"].iter() {
-          match id3.popularity(author) {
-            Some((_, rating)) if rating != song.rating as u8 || force => {
-              info!(
+  match ID3rs::read(&song.path) {
+    Err(_) => error!("Cannot read ID3 for {}", song.path),
+    Ok(mut id3) => {
+      for author in ["itunes", "traktor@native-instruments.de"].iter() {
+        match id3.popularity(author) {
+          Some((_, rating)) if rating != song.rating as u8 || force => {
+            info!(
                 r#"Update "{}" with Music {} over ID3 {} as '{}'"#,
                 song.relative_path(),
                 song.rating,
                 rating,
                 author );
-              rate_song(&mut id3, author);
-              return;
-            }
-            Some((_, _)) => return,
-            _ => trace!(r#"No rating for "{}" by {}"#, song.relative_path(), author)
+            rate_song(&mut id3, author);
+            return;
           }
+          Some((_, _)) => return,
+          _ => trace!(r#"No rating for "{}" by {}"#, song.relative_path(), author)
         }
-        info!(r#"Rate "{}" from Music {}"#, song.relative_path(), song.rating);
-        rate_song(&mut id3, "itunes");
       }
+      info!(r#"Rate "{}" from Music {}"#, song.relative_path(), song.rating);
+      rate_song(&mut id3, "itunes");
     }
   }
 }
