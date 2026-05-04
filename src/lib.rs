@@ -8,6 +8,7 @@ use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
 use anyhow::anyhow;
+use futures::{stream, StreamExt};
 use tracing::{debug, error, info, trace, warn};
 
 pub struct Music {
@@ -187,23 +188,21 @@ pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, f
 }
 
 pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, force: bool) {
-  let handles = songs
-    .into_iter()
+  stream::iter(songs)
     .map(|song| {
       let database = database.clone();
-      tokio::spawn(async move {
+      async move {
         // rate_song(&song, &database, dry_run, force).await;
-        match group_song(&song, database, dry_run, force).await {
-          Ok(_) => {},
-          Err(e) => error!("Failed to group song: {}", e),
-        };
-      })
+        group_song(&song, database, dry_run, force).await
+      }
     })
-    .collect::<Vec<_>>();
-
-  for handle in handles {
-    handle.await.unwrap();
-  }
+    .buffer_unordered(10)
+    .for_each(|result| async {
+      if let Err(e) = result {
+        error!("Failed to group song: {}", e)
+      }
+    })
+    .await;
 }
 
 pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[&'static str], dry_run: bool) {
