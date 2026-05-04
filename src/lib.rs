@@ -214,7 +214,7 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, fo
     .map(|song| {
       let database = database.clone();
       async move {
-        // rate_song(&song, &database, dry_run, force).await;
+        rate_song(&song, &database, dry_run, force).await?;
         group_song(&song, database, dry_run, force).await
       }
     })
@@ -222,8 +222,8 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, fo
     .for_each(|result| async {
       match result {
         Err(e) if e.downcast_ref::<ContentError>().is_some() =>
-          debug!("Failed to group song: {}", e),
-        Err(e) => error!("Failed to group song: {}", e),
+          debug!("Failed on song: {}", e),
+        Err(e) => error!("Failed on song: {}", e),
         Ok(_) => {}
       }
     })
@@ -315,54 +315,53 @@ async fn tag_song(song: &Song, database: Database, tag: String, set: Vec<&str>, 
   Ok(content)
 }
 
-async fn rate_song(song: &Song, database: &Database, dry_run: bool, force: bool) {
+async fn rate_song(song: &Song, database: &Database, dry_run: bool, force: bool) -> anyhow::Result<(), Box<dyn Error>> {
   if song.rating == 0 {
-    return;
+    return Ok(());
   }
 
-  match (fs::exists(&song.path).ok(), song.deezer_id()) {
+  match (fs::exists(&song.path).ok(), content_for(song, database).await) {
     (Some(exists), _) if exists && song.rating == 1 => {
       if dry_run {
         info!(r#"Would delete "{}" with {} star rating"#, song.relative_path(), song.rating);
       } else {
         warn!(r#"Delete "{}" with {} star rating"#, song.relative_path(), song.rating);
-        fs::remove_file(&song.path).unwrap();
+        fs::remove_file(&song.path)?;
       }
+      Ok(())
     }
-    (Some(exists), Some(dzid)) if exists => {
-      match database.content(dzid).await {
-        Ok(content) if force => {
-          if dry_run {
-            info!(r#"Would rate "{}" over rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
-          } else {
-            info!(r#"Force rating "{}" of rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
-            database.rate_content(&content, song.rating as u8).await.unwrap();
-          }
+    (_, Ok(content)) if force => {
+      if dry_run {
+        info!(r#"Would rate "{}" over rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
+      } else {
+        info!(r#"Force rating "{}" of rekordbox {} with {}"#, song.relative_path(), content.Rating, song.rating);
+        database.rate_content(&content, song.rating as u8).await?;
+      }
+      update_id3(song, dry_run, force).await;
+      Ok(())
+    }
+    (_, Ok(content)) => {
+      if song.rating > 0 && content.Rating == 0 {
+        if dry_run {
+          info!(r#"Would rate "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
+        } else {
+          info!(r#"Rating "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
+          database.rate_content(&content, song.rating as u8).await?;
         }
-        Ok(content) => {
-          if song.rating > 0 && content.Rating == 0 {
-            if dry_run {
-              info!(r#"Would rate "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
-            } else {
-              info!(r#"Rating "{}" in rekordbox as {}"#, song.relative_path(), song.rating);
-              database.rate_content(&content, song.rating as u8).await.unwrap();
-            }
-          } else if song.rating > 0 && song.rating != content.Rating as usize {
-            warn!(
+      } else if song.rating > 0 && song.rating != content.Rating as usize {
+        warn!(
               r#"Clash on "{}" with Music {} and rekordbox {} rating"#,
               song.relative_path(),
               song.rating,
               content.Rating
             );
-          }
-        }
-        Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
       }
       update_id3(song, dry_run, force).await;
+      Ok(())
     }
-    (_, None) => debug!("No Deezer ID {}", song.path),
-    _ => error!("Does not exist {}", song.path),
+    (_, Err(e)) => Err(e.into()),
   }
+}
 
   async fn update_id3(song: &Song, dry_run: bool, force: bool) {
     let rate_song = |id3: &mut ID3rs, author| {
