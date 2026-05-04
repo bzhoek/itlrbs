@@ -1,3 +1,4 @@
+use std::error::Error;
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use id3rs::ID3rs;
 use objc2::rc::Retained;
@@ -7,7 +8,6 @@ use rbsqlx::{Content, Database};
 use regex::Regex;
 use std::fs;
 use std::sync::OnceLock;
-use anyhow::anyhow;
 use futures::{stream, StreamExt};
 use tracing::{debug, error, info, trace, warn};
 
@@ -104,6 +104,25 @@ impl Music {
 }
 
 #[derive(Debug)]
+pub enum ContentError {
+  FilesystemMissing(String),
+  NoDeezerID(String),
+  RekordboxMissing(String),
+}
+
+impl std::error::Error for ContentError {}
+
+impl std::fmt::Display for ContentError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ContentError::FilesystemMissing(path) => write!(f, r#"Not in filesystem "{}"#, path),
+      ContentError::NoDeezerID(path) => write!(f, r#"No Deezer ID in "{}"#, path),
+      ContentError::RekordboxMissing(path) => write!(f, r#"Not in rekordbox "{}"#, path),
+    }
+  }
+}
+
+#[derive(Debug)]
 pub enum SelectionError {
   Empty,
   TooMany(usize),
@@ -176,6 +195,9 @@ pub async fn group_music(songs: Vec<Song>, database: &Database, dry_run: bool, f
       tokio::spawn(async move {
         match group_song(&song, database, dry_run, force).await {
           Ok(_) => {},
+          Err(e) if e.downcast_ref::<ContentError>().is_some() => {
+            debug!("Failed to group song: {}", e);
+          },
           Err(e) => error!("Failed to group song {} because: {}", song.relative_path(), e),
         };
       })
@@ -198,8 +220,11 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, fo
     })
     .buffer_unordered(10)
     .for_each(|result| async {
-      if let Err(e) = result {
-        error!("Failed to group song: {}", e)
+      match result {
+        Err(e) if e.downcast_ref::<ContentError>().is_some() =>
+          debug!("Failed to group song: {}", e),
+        Err(e) => error!("Failed to group song: {}", e),
+        Ok(_) => {}
       }
     })
     .await;
@@ -226,7 +251,7 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
   }
 }
 
-async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool) -> anyhow::Result<Content, anyhow::Error> {
+async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool) -> anyhow::Result<Content, Box<dyn Error>> {
   let content = content_for(song, &database).await?;
   if let Some(date) = &song.date() {
     let recents = database.playlist_top("recent").await?;
@@ -253,14 +278,14 @@ async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool
   Ok(content)
 }
 
-async fn content_for(song: &Song, database: &Database) -> anyhow::Result<Content, anyhow::Error> {
+async fn content_for(song: &Song, database: &Database) -> anyhow::Result<Content, ContentError> {
   match (fs::exists(&song.path).ok(), song.deezer_id()) {
     (Some(exists), Some(dzid)) if exists =>
       database.content(dzid).await
-        .map_err(|_| anyhow!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid)),
+        .map_err(|_| ContentError::RekordboxMissing(song.relative_path().into())),
     (Some(exists), _) if !exists =>
-      Err(anyhow!(r#"Not in filesystem "{}""#, song.relative_path())),
-    _ => Err(anyhow!(r#"No Deezer ID in "{}""#, song.relative_path())),
+      Err(ContentError::FilesystemMissing(song.relative_path().into())),
+    _ => Err(ContentError::NoDeezerID(song.relative_path().into())),
   }
 }
 
@@ -333,7 +358,7 @@ async fn rate_song(song: &Song, database: &Database, dry_run: bool, force: bool)
         }
         Err(_) => warn!(r#"Not in rekordbox "{}" with {:?}"#, song.relative_path(), dzid),
       }
-      update_id3(&song, dry_run, force).await;
+      update_id3(song, dry_run, force).await;
     }
     (_, None) => debug!("No Deezer ID {}", song.path),
     _ => error!("Does not exist {}", song.path),
