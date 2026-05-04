@@ -231,24 +231,25 @@ pub async fn rate_music(songs: Vec<Song>, database: &Database, dry_run: bool, fo
 }
 
 pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[&'static str], dry_run: bool) {
-  let handles = songs
-    .into_iter()
+  stream::iter(songs)
     .map(|song| {
-      let tag = tag.to_string();
       let database = database.clone();
       let set = set.to_owned();
-      tokio::spawn(async move {
-        match tag_song(&song, database, tag, set, dry_run).await {
-          Ok(_) => {}
-          Err(e) => error!("Failed to tag: {}", e),
-        };
-      })
+      let tag = tag.to_string();
+      async move {
+        tag_song(&song, database, tag, set, dry_run).await
+      }
     })
-    .collect::<Vec<_>>();
-
-  for handle in handles {
-    handle.await.unwrap();
-  }
+    .buffer_unordered(10)
+    .for_each(|result| async {
+      match result {
+        Err(e) if e.downcast_ref::<ContentError>().is_some() =>
+          debug!("Failed on song: {}", e),
+        Err(e) => error!("Failed on song: {}", e),
+        Ok(_) => {}
+      }
+    })
+    .await;
 }
 
 async fn group_song(song: &Song, database: Database, dry_run: bool, _force: bool) -> anyhow::Result<Content, Box<dyn Error>> {
