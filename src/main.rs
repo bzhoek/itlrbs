@@ -57,6 +57,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   info!("Rate {} songs", songs.len());
   rate_music(songs, database, cli.dry_run, false).await;
 
+  if cli.dry_run {
+    info!("Would reorder playlists under recent/");
+  } else {
+    let recents = database.playlist_top("recent").await?;
+    database.playlist_reorder(&recents).await?;
+    info!("Reordered playlists under recent/");
+  }
+
   let sets = vec![
     vec!["eatmos", "ebup", "edrive", "epeak", "ebang", "ebdown"],
     vec!["vocals"],
