@@ -63,7 +63,7 @@ impl Music {
     self.playlist_items_iter(name).flatten().collect()
   }
 
-  pub fn playlist_item(&self, name: &str, needle: &Retained<ITLibMediaItem>) -> Vec<Retained<ITLibMediaItem>> {
+  pub fn playlist_item(&self, name: &str, needle: &ITLibMediaItem) -> Vec<Retained<ITLibMediaItem>> {
     unsafe {
       self.playlist_items_iter(name).flatten()
         .filter(|it| it.persistentID() == needle.persistentID())
@@ -234,8 +234,6 @@ pub async fn tag_music(songs: Vec<Song>, database: &Database, tag: &str, set: &[
   stream::iter(songs)
     .map(|song| {
       let database = database.clone();
-      let set = set.to_owned();
-      let tag = tag.to_string();
       async move {
         tag_song(&song, database, tag, set, dry_run).await
       }
@@ -290,7 +288,7 @@ async fn content_for(song: &Song, database: &Database) -> anyhow::Result<Content
   }
 }
 
-async fn tag_song(song: &Song, database: Database, tag: String, set: Vec<&str>, dry_run: bool) -> anyhow::Result<Content, anyhow::Error> {
+async fn tag_song(song: &Song, database: Database, tag: &str, set: &[&str], dry_run: bool) -> anyhow::Result<Content, anyhow::Error> {
   let content = content_for(song, &database).await?;
   let tags = database.content_tags(&content).await?;
   let names = tags.iter()
@@ -308,9 +306,9 @@ async fn tag_song(song: &Song, database: Database, tag: String, set: Vec<&str>, 
     }
   }
 
-  if dry_run && !names.contains(&&*tag) {
+  if dry_run && !names.contains(&tag) {
     info!(r#"Would tag "{}" with {}"#, song.relative_path(), tag);
-  } else if let Some(usn) = database.tag_content(&content, &tag).await? {
+  } else if let Some(usn) = database.tag_content(&content, tag).await? {
     info!(r#"Tagged "{}" with {} usn {}"#, song.relative_path(), tag, usn);
   }
   Ok(content)
